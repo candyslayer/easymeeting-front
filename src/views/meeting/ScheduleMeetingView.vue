@@ -2,13 +2,18 @@
   <div class="schedule-view">
     <div class="schedule-container meeting-card">
       <div class="header-box">
-        <div class="icon-wrap">
-          <CalendarOutlined />
+        <div class="header-box-left">
+          <div class="icon-wrap">
+            <CalendarOutlined />
+          </div>
+          <div class="header-text">
+            <h2 class="title">预约新会议</h2>
+            <p class="subtitle">规划未来议程，通过邮件自动通知受邀联系人</p>
+          </div>
         </div>
-        <div class="header-text">
-          <h2 class="title">预约新会议</h2>
-          <p class="subtitle">规划未来议程，通过邮件自动通知受邀联系人</p>
-        </div>
+        <a-button type="default" @click="router.push('/meeting/history?tab=scheduled')">
+          <HistoryOutlined /> 查看已预约会议
+        </a-button>
       </div>
 
       <!-- 预约表单 -->
@@ -129,6 +134,9 @@
               <a-button type="primary" size="large" @click="enterScheduledMeeting">
                 立即进入该会议室
               </a-button>
+              <a-button size="large" @click="router.push('/meeting/history?tab=scheduled')">
+                查看我的预约列表
+              </a-button>
               <a-button size="large" @click="handleCopyFullInvite">
                 复制完整邀请文案
               </a-button>
@@ -148,9 +156,9 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
-import { CalendarOutlined } from '@ant-design/icons-vue'
+import { CalendarOutlined, HistoryOutlined } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { quickMeeting, updateMeetingTime, sendInviteEmail, generateInvite } from '@/api/meeting'
+import { saveMeeting, updateMeetingTime, sendInviteEmail, generateInvite } from '@/api/meeting'
 import { formatMeetingNo, copyText } from '@/utils/format'
 
 const router = useRouter()
@@ -194,11 +202,13 @@ async function handleSchedule() {
     const startTimeStr = formState.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
     const endTimeStr = formState.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
 
-    // 1. 调用真实接口 quickMeeting 创建会议
-    const meetingId = await quickMeeting({
+    // 1. 调用真实接口 saveMeeting 预约会议
+    const meetingId = await saveMeeting({
       meetingNoType: formState.meetingNoType,
       meetingName: formState.meetingName.trim(),
-      jionType: enablePassword.value ? 1 : 0,
+      startTime: startTimeStr,
+      endTime: endTimeStr,
+      joinType: enablePassword.value ? 1 : 0,
       jionPassword: enablePassword.value ? formState.jionPassword.trim() : ''
     })
 
@@ -306,10 +316,16 @@ function resetForm() {
 .header-box {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border-light);
   margin-bottom: 24px;
+}
+
+.header-box-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .icon-wrap {

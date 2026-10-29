@@ -32,6 +32,7 @@
           <div class="user-profile-compact">
             <a-avatar
               :size="36"
+              :src="getAvatarUrl(authStore.userId)"
               :style="{ backgroundColor: '#1677ff', verticalAlign: 'middle' }"
             >
               {{ authStore.nickName?.slice(0, 1) || '用' }}
@@ -112,6 +113,7 @@ import {
   LogoutOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { getAvatarUrl } from '@/api/auth'
 
 const router = useRouter()
 const currentRoute = useRoute()

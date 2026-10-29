@@ -5,6 +5,7 @@
       <div class="welcome-left">
         <a-avatar
           :size="64"
+          :src="getAvatarUrl(authStore.userId)"
           :style="{ backgroundColor: '#1677ff', fontSize: '26px' }"
         >
           {{ authStore.nickName?.slice(0, 1) || '用' }}
@@ -61,18 +62,23 @@
       </div>
     </section>
 
-    <!-- 进行中/今日会议列表 -->
+    <!-- 进行中与已预约会议列表 -->
     <section class="section-container">
       <div class="section-header">
         <div class="title-with-badge">
-          <h3 class="section-title">进行中与今日会议</h3>
+          <h3 class="section-title">我的预约与进行中会议</h3>
           <a-tag v-if="todayMeetings.length > 0" color="processing">
-            {{ todayMeetings.length }} 场进行中
+            {{ todayMeetings.length }} 场待开 / 进行中
           </a-tag>
         </div>
-        <a-button type="link" size="small" :loading="loadingToday" @click="fetchTodayMeetings">
-          <ReloadOutlined /> 刷新
-        </a-button>
+        <div class="header-action-links">
+          <router-link to="/meeting/history?tab=scheduled" class="view-all-link">
+            全部预约会议 <RightOutlined />
+          </router-link>
+          <a-button type="link" size="small" :loading="loadingToday" @click="fetchTodayMeetings">
+            <ReloadOutlined /> 刷新
+          </a-button>
+        </div>
       </div>
 
       <!-- 加载中骨架 -->
@@ -86,13 +92,19 @@
           class="meeting-item-card meeting-card"
         >
           <div class="item-left">
-            <div class="status-indicator live"></div>
+            <div class="status-indicator" :class="{ live: meeting.status === 0 }"></div>
             <div class="item-content">
-              <h4 class="item-name ellipsis">{{ meeting.meetingName || '在线会议' }}</h4>
+              <div class="item-header-row">
+                <h4 class="item-name ellipsis">{{ meeting.meetingName || '在线会议' }}</h4>
+                <a-tag :color="meeting.status === 0 ? 'processing' : 'default'">
+                  {{ meeting.status === 0 ? '进行中 / 已预约' : '已结束' }}
+                </a-tag>
+              </div>
               <div class="item-meta">
                 <span>会议号: <strong>{{ formatMeetingNo(meeting.meetingNo) }}</strong></span>
                 <a-divider type="vertical" />
-                <span>开始时间: {{ formatDateTime(meeting.startTime) }}</span>
+                <span>开始时间: {{ formatDateTime(meeting.startTime) || formatDateTime(meeting.createTime) }}</span>
+                <span v-if="meeting.endTime"> ~ {{ formatDateTime(meeting.endTime) }}</span>
                 <a-divider type="vertical" />
                 <span v-if="meeting.joinType === 1" class="lock-tag">
                   <LockOutlined /> 密码保护
@@ -114,13 +126,18 @@
 
       <!-- 空状态 -->
       <div v-else class="empty-state-box meeting-card">
-        <a-empty description="今日暂无进行中的会议">
+        <a-empty description="暂无预约或进行中的会议">
           <template #image>
             <ScheduleOutlined style="font-size: 48px; color: #bfbfbf" />
           </template>
-          <a-button type="primary" @click="quickMeetingModalVisible = true">
-            发起一场快速会议
-          </a-button>
+          <a-space>
+            <a-button type="primary" @click="router.push('/meeting/schedule')">
+              <CalendarOutlined /> 预约新会议
+            </a-button>
+            <a-button @click="quickMeetingModalVisible = true">
+              发起快速会议
+            </a-button>
+          </a-space>
         </a-empty>
       </div>
     </section>
@@ -260,6 +277,7 @@ import {
   RightOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { getAvatarUrl } from '@/api/auth'
 import { quickMeeting, loadTodayMeeting, loadMeetingHistory } from '@/api/meeting'
 import { formatMeetingNo, formatDateTime } from '@/utils/format'
 import DeviceTestModal from '@/components/common/DeviceTestModal.vue'
@@ -298,9 +316,10 @@ async function fetchTodayMeetings() {
   loadingToday.value = true
   try {
     const res = await loadTodayMeeting()
-    todayMeetings.value = res || []
+    const list = Array.isArray(res) ? res : (res?.list || res?.data || [])
+    todayMeetings.value = list
   } catch (err) {
-    console.error('获取今日会议失败:', err)
+    console.error('获取预约与今日会议失败:', err)
   } finally {
     loadingToday.value = false
   }
@@ -310,8 +329,7 @@ async function fetchRecentHistory() {
   loadingHistory.value = true
   try {
     const res = await loadMeetingHistory(1)
-    // res 为 PaginationResultVO: { totalCount, pageNO, list }
-    const list = res?.list || []
+    const list = Array.isArray(res) ? res : (res?.list || res?.records || res?.rows || res?.data || [])
     recentMeetings.value = list.slice(0, 5)
   } catch (err) {
     console.error('获取历史会议失败:', err)

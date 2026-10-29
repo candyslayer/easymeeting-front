@@ -212,8 +212,35 @@ export function cancelInvite(inviteId) {
  * @param {Object} params { meetingId, startTime, endTime, changeReason }
  */
 export function updateMeetingTime(params) {
-  return http.post('/meeting/updateMeetingTime', null, {
+  return http.post('/meetingReserve/updateMeetingTime', null, {
     params
+  })
+}
+
+/**
+ * 预约/创建未来会议
+ * @param {Object} params { meetingNoType, meetingName, startTime, endTime, joinType, jionPassword }
+ */
+export function saveMeeting(params) {
+  return http.post('/meetingReserve/saveMeeting', null, {
+    params: {
+      meetingNoType: params.meetingNoType ?? 1,
+      meetingName: params.meetingName,
+      startTime: params.startTime,
+      endTime: params.endTime,
+      joinType: params.joinType ?? 0,
+      jionPassword: params.jionPassword || ''
+    }
+  })
+}
+
+/**
+ * 删除/取消预约会议
+ * @param {string} meetingId 
+ */
+export function delMeeting(meetingId) {
+  return http.post('/meetingReserve/delMeeting', null, {
+    params: { meetingId }
   })
 }
 
@@ -231,7 +258,10 @@ export function loadTodayMeeting() {
  */
 export function loadMeetingHistory(pageNo = 1) {
   return http.get('/meetingReserve/loadMeeting', {
-    params: { pageNo }
+    params: {
+      pageNo,
+      pageNO: pageNo
+    }
   })
 }
 
