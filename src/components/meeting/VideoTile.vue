@@ -85,6 +85,7 @@ const props = defineProps({
 })
 
 const videoEl = ref(null)
+const hasActiveVideoTrack = ref(false)
 
 const displayName = computed(() => {
   return props.member?.nickName || props.member?.userName || '参会者'
@@ -98,16 +99,31 @@ const isScreenShare = computed(() => {
   return !!props.member?.screenShare
 })
 
-// 是否真正有视频轨道并且启用
-const hasVideo = computed(() => {
+function checkHasVideo() {
   if (props.member?.openVideo === false) {
     return false
   }
   if (!props.stream) {
     return false
   }
-  const videoTracks = props.stream.getVideoTracks()
-  return videoTracks.length > 0 && videoTracks.some((t) => t.enabled)
+  try {
+    const videoTracks = props.stream.getVideoTracks ? props.stream.getVideoTracks() : []
+    return videoTracks.length > 0 && videoTracks.some((t) => t.enabled && t.readyState !== 'ended')
+  } catch (e) {
+    return false
+  }
+}
+
+function updateTrackState() {
+  hasActiveVideoTrack.value = checkHasVideo()
+}
+
+// 是否真正有视频画面并且启用
+const hasVideo = computed(() => {
+  if (props.member?.openVideo === false) {
+    return false
+  }
+  return hasActiveVideoTrack.value
 })
 
 const avatarBgColor = computed(() => {
@@ -118,20 +134,46 @@ const avatarBgColor = computed(() => {
 })
 
 function attachStream() {
-  if (videoEl.value) {
-    if (props.stream) {
-      if (videoEl.value.srcObject !== props.stream) {
-        videoEl.value.srcObject = props.stream
-      }
-    } else {
-      videoEl.value.srcObject = null
+  const el = videoEl.value
+  if (!el) return
+
+  const stream = props.stream
+  if (stream) {
+    if (el.srcObject !== stream) {
+      el.srcObject = stream
     }
+    // 自动播放音频和视频流
+    el.play?.().catch((err) => {
+      console.warn('视频元素自动播放提示 (受浏览器策略影响):', err)
+    })
+
+    // 绑定音视频轨道状态变动监听
+    try {
+      const tracks = stream.getTracks ? stream.getTracks() : []
+      tracks.forEach((track) => {
+        track.onunmute = () => updateTrackState()
+        track.onmute = () => updateTrackState()
+        track.onended = () => updateTrackState()
+      })
+      if (stream.onaddtrack !== undefined) {
+        stream.onaddtrack = () => {
+          attachStream()
+        }
+      }
+    } catch (e) {}
+  } else {
+    el.srcObject = null
   }
+  updateTrackState()
 }
 
-watch(() => props.stream, () => {
-  attachStream()
-}, { immediate: true })
+watch(
+  [() => props.stream, () => props.member?.openVideo],
+  () => {
+    attachStream()
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   attachStream()

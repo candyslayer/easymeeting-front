@@ -1,20 +1,25 @@
-import { ref, reactive } from 'vue'
+import { ref, shallowReactive, markRaw } from 'vue'
 import { message } from 'ant-design-vue'
 
 export function useWebRTC(websocketService, localStreamRef) {
   // 保存每个远端参会者的 RTCPeerConnection 实例与媒体流
   const peerConnections = new Map() // remoteUserId -> RTCPeerConnection
-  const remoteStreams = reactive({}) // remoteUserId -> MediaStream
+  // 必须使用 shallowReactive，不能用深度 reactive，否则会将原生 MediaStream 包装为 Proxy，导致 video.srcObject 报错并且无法触发更新
+  const remoteStreams = shallowReactive({}) // remoteUserId -> MediaStream
   const pendingCandidates = new Map() // remoteUserId -> RTCIceCandidateInit[]
 
-  // ICE 配置
+  // ICE 配置 (优先国内稳定可达的公共 STUN 服务器，避免谷歌 STUN 无法直连超时)
   const rtcConfig = {
     iceServers: [
       {
         urls: [
-          import.meta.env.VITE_STUN_SERVER || 'stun:stun.l.google.com:19302',
-          'stun:stun1.l.google.com:19302'
-        ]
+          'stun:stun.qq.com:3478',
+          'stun:stun.chat.bilibili.com:3478',
+          'stun:stun.miwifi.com:3478',
+          'stun:stun.cloudflare.com:3478',
+          'stun:stun.l.google.com:19302',
+          import.meta.env.VITE_STUN_SERVER || 'stun:stun.qq.com:3478'
+        ].filter(Boolean)
       }
     ],
     iceCandidatePoolSize: 4
@@ -44,7 +49,11 @@ export function useWebRTC(websocketService, localStreamRef) {
         websocketService.send({
           messageType: 2,
           signalType: 'candidate',
-          signalData: JSON.stringify(event.candidate.toJSON()),
+          signalData: JSON.stringify(event.candidate.toJSON ? event.candidate.toJSON() : {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex
+          }),
           receiveUserId: remoteUserId
         })
       }
@@ -52,14 +61,24 @@ export function useWebRTC(websocketService, localStreamRef) {
 
     // 3. 接收远端音视频轨道并组装 MediaStream
     pc.ontrack = (event) => {
-      console.log(`收到来自用户 ${remoteUserId} 的媒体轨道:`, event.track.kind)
-      if (event.streams && event.streams[0]) {
-        remoteStreams[remoteUserId] = event.streams[0]
+      console.log(`收到来自用户 ${remoteUserId} 的媒体轨道:`, event.track.kind, event.track.id)
+      const stream = (event.streams && event.streams[0]) ? event.streams[0] : null
+      if (stream) {
+        // 创建独立副本包装当前所有轨道，保证触发 shallowReactive 引用变化并防止 Proxy
+        const freshStream = new MediaStream(stream.getTracks())
+        remoteStreams[remoteUserId] = markRaw(freshStream)
       } else {
         if (!remoteStreams[remoteUserId]) {
-          remoteStreams[remoteUserId] = new MediaStream()
+          remoteStreams[remoteUserId] = markRaw(new MediaStream())
         }
         remoteStreams[remoteUserId].addTrack(event.track)
+        remoteStreams[remoteUserId] = markRaw(new MediaStream(remoteStreams[remoteUserId].getTracks()))
+      }
+
+      event.track.onunmute = () => {
+        if (remoteStreams[remoteUserId]) {
+          remoteStreams[remoteUserId] = markRaw(new MediaStream(remoteStreams[remoteUserId].getTracks()))
+        }
       }
     }
 
@@ -153,7 +172,13 @@ export function useWebRTC(websocketService, localStreamRef) {
         // 收到 ICE Candidate
         const pc = peerConnections.get(senderUserId)
         if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-          await pc.addIceCandidate(new RTCIceCandidate(parsedData))
+          try {
+            if (parsedData && parsedData.candidate) {
+              await pc.addIceCandidate(new RTCIceCandidate(parsedData))
+            }
+          } catch (e) {
+            console.warn('添加 ICE Candidate 异常:', e)
+          }
         } else {
           // 远端描述尚未设置时暂存 Candidate
           if (!pendingCandidates.has(senderUserId)) {
@@ -175,7 +200,9 @@ export function useWebRTC(websocketService, localStreamRef) {
       const candidates = pendingCandidates.get(userId)
       for (const cand of candidates) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(cand))
+          if (cand && cand.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand))
+          }
         } catch (e) {
           console.warn('添加暂存 Candidate 失败:', e)
         }

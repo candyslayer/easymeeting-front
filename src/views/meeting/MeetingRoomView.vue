@@ -286,6 +286,7 @@ const {
 // 3. 初始化 WebRTC P2P Mesh 协商控制器
 const {
   remoteStreams: rtcRemoteStreams,
+  peerConnections,
   initiateOffer,
   handleSignal,
   replaceTrackForAllPeers,
@@ -425,20 +426,23 @@ async function initMeetingRoom() {
       console.warn('本地音视频设备获取不完整，降级入会:', e)
     }
 
-    // 步骤 3：建立与后端的 WebSocket 信令通道
-    loadingTip.value = '正在连接 Netty WebSocket 信令服务器...'
-    connectWs(authStore.token)
+    // 步骤 3：在入会前预先注册好全部 WebSocket 信令监听（防止漏掉先发过来的 Offer 或成员加入通知）
+    setupWebSocketListeners()
 
-    // 步骤 4：调用后端正式入会接口 /meeting/jionMeeting 广播给全员
+    // 步骤 4：建立与后端的 WebSocket 信令通道并等待握手成功
+    loadingTip.value = '正在连接 Netty WebSocket 信令服务器...'
+    await connectWs(authStore.token)
+
+    // 步骤 5：调用后端正式入会接口 /meeting/jionMeeting 广播给全员
     loadingTip.value = '正在加入会议房间...'
     await jionMeeting(isVideoActive.value)
 
-    // 步骤 5：加载房间内已有的成员列表和历史聊天记录
+    // 步骤 6：加载房间内已有的成员列表和历史聊天记录
     await refreshMemberList()
     loadChatHistory()
 
-    // 步骤 6：监听 WebSocket 信令
-    setupWebSocketListeners()
+    // 步骤 7：对房间内已有远端成员进行对等连接探测与双向保活
+    syncPeersWithExistingMembers()
 
     joiningMeeting.value = false
     message.success('已成功加入会议！')
@@ -508,6 +512,19 @@ function setupWebSocketListeners() {
       unreadChatCount.value++
     }
   })
+}
+
+// 针对房间已有远端成员进行对等连接保活与协商补偿
+function syncPeersWithExistingMembers() {
+  setTimeout(() => {
+    if (!meetingStore.remoteMemberList || meetingStore.remoteMemberList.length === 0) return
+    meetingStore.remoteMemberList.forEach((member) => {
+      if (member.userId && !peerConnections.has(member.userId)) {
+        console.log('检测到尚未建立 WebRTC 连接的房间已有成员，主动发起协商:', member.userId)
+        initiateOffer(member.userId)
+      }
+    })
+  }, 1200)
 }
 
 // 麦克风开关

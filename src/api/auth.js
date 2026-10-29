@@ -80,9 +80,7 @@ export function updateUserInfo(data) {
   if (data.avatar) {
     formData.append('avatar', data.avatar)
   }
-  return http.post('/account/updateUserInfo', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  })
+  return http.post('/account/updateUserInfo', formData)
 }
 
 /**
@@ -92,9 +90,7 @@ export function updateUserInfo(data) {
 export function uploadAvatar(file) {
   const formData = new FormData()
   formData.append('avatar', file)
-  return http.post('/account/uploadAvatar', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  })
+  return http.post('/account/uploadAvatar', formData)
 }
 
 /**

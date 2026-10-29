@@ -140,6 +140,7 @@
             </div>
 
             <a-form
+              :model="profileForm"
               layout="vertical"
               style="max-width: 520px; margin-top: 24px"
               @finish="handleSaveProfile"
@@ -156,7 +157,7 @@
                 <a-input :value="authStore.userInfo?.email || '已绑定'" disabled />
               </a-form-item>
 
-              <a-form-item label="用户昵称" required>
+              <a-form-item label="用户昵称" required name="nickName">
                 <a-input
                   v-model:value="profileForm.nickName"
                   placeholder="请输入您的显示昵称"
@@ -165,7 +166,7 @@
                 />
               </a-form-item>
 
-              <a-form-item label="性别">
+              <a-form-item label="性别" name="sex">
                 <a-radio-group v-model:value="profileForm.sex">
                   <a-radio :value="1">男</a-radio>
                   <a-radio :value="0">女</a-radio>
@@ -173,7 +174,12 @@
               </a-form-item>
 
               <a-form-item style="margin-top: 20px">
-                <a-button type="primary" html-type="submit" :loading="savingProfile">
+                <a-button
+                  type="primary"
+                  html-type="submit"
+                  :loading="savingProfile"
+                  @click="handleSaveProfile"
+                >
                   保存个人资料
                 </a-button>
               </a-form-item>
@@ -188,11 +194,12 @@
             <p class="subtitle-text">为了您的账号安全，请定期更换密码，密码长度不少于 6 位。</p>
 
             <a-form
+              :model="pwdForm"
               layout="vertical"
               style="max-width: 460px; margin-top: 20px"
               @finish="handleUpdatePassword"
             >
-              <a-form-item label="原密码" required>
+              <a-form-item label="原密码" required name="oldPassword">
                 <a-input-password
                   v-model:value="pwdForm.oldPassword"
                   placeholder="请输入当前旧密码"
@@ -200,7 +207,7 @@
                 />
               </a-form-item>
 
-              <a-form-item label="新密码" required>
+              <a-form-item label="新密码" required name="newPassword">
                 <a-input-password
                   v-model:value="pwdForm.newPassword"
                   placeholder="请输入新密码（不少于6位）"
@@ -208,7 +215,7 @@
                 />
               </a-form-item>
 
-              <a-form-item label="确认新密码" required>
+              <a-form-item label="确认新密码" required name="confirmPassword">
                 <a-input-password
                   v-model:value="pwdForm.confirmPassword"
                   placeholder="请再次输入新密码确认"
@@ -217,7 +224,13 @@
               </a-form-item>
 
               <a-form-item style="margin-top: 24px">
-                <a-button type="primary" danger html-type="submit" :loading="savingPwd">
+                <a-button
+                  type="primary"
+                  danger
+                  html-type="submit"
+                  :loading="savingPwd"
+                  @click="handleUpdatePassword"
+                >
                   确认修改密码
                 </a-button>
               </a-form-item>
@@ -257,7 +270,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { CameraOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -271,10 +285,11 @@ import {
 } from '@/api/auth'
 import { copyText } from '@/utils/format'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const mediaStore = useMediaStore()
 
-const activeTab = ref('media')
+const activeTab = ref(route.query.tab || 'media')
 const previewVideoEl = ref(null)
 
 // 个人资料表单
@@ -297,6 +312,7 @@ const pwdForm = reactive({
 })
 
 const {
+  localStream,
   isAudioActive,
   isVideoActive,
   micVolumeLevel,
@@ -307,6 +323,25 @@ const {
   startMicMeter,
   stopMicMeter
 } = useMediaDevices()
+
+// 监听标签页切换：仅当停留在“音视频设备”标签页时开启摄像头与麦克风，切换到个人资料等其它标签页时彻底释放硬件
+watch(activeTab, async (newTab) => {
+  if (newTab === 'media') {
+    await initSettingsPreview()
+  } else {
+    stopSettingsPreview()
+  }
+})
+
+// 监听路由参数变化（方便从外部带 query 跳转指定标签页）
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab && tab !== activeTab.value) {
+      activeTab.value = tab
+    }
+  }
+)
 
 async function fetchLatestUserInfo() {
   try {
@@ -345,7 +380,8 @@ function handleBeforeAvatarUpload(file) {
 }
 
 async function handleSaveProfile() {
-  if (!profileForm.nickName.trim()) {
+  if (savingProfile.value) return
+  if (!profileForm.nickName || !profileForm.nickName.trim()) {
     message.warning('请输入用户昵称')
     return
   }
@@ -358,7 +394,7 @@ async function handleSaveProfile() {
       avatar: avatarFile.value || undefined
     })
 
-    authStore.updateUserInfo({
+    authStore.updateUserInfo(res || {
       nickName: profileForm.nickName.trim(),
       sex: profileForm.sex
     })
@@ -376,6 +412,7 @@ async function handleSaveProfile() {
 }
 
 async function handleUpdatePassword() {
+  if (savingPwd.value) return
   if (!pwdForm.oldPassword) {
     message.warning('请输入当前原密码')
     return
@@ -424,12 +461,21 @@ async function initSettingsPreview() {
   await enumerateDevices()
   try {
     const stream = await initLocalStream({ audio: true, video: true })
+    await nextTick()
     if (previewVideoEl.value && stream) {
       previewVideoEl.value.srcObject = stream
     }
     startMicMeter(stream)
   } catch (e) {
     console.warn('打开设置预览失败:', e)
+  }
+}
+
+function stopSettingsPreview() {
+  stopMicMeter()
+  stopLocalStream()
+  if (previewVideoEl.value) {
+    previewVideoEl.value.srcObject = null
   }
 }
 
@@ -447,21 +493,64 @@ function handleSpeakerChange(id) {
   mediaStore.setSelectedAudioOutput(id)
 }
 
-function toggleVideoTest() {
-  toggleVideo()
+async function toggleVideoTest() {
+  if (isVideoActive.value) {
+    // 关闭预览：停止视频轨道以释放摄像头硬件并熄灭指示灯
+    if (localStream.value) {
+      localStream.value.getVideoTracks().forEach((track) => {
+        track.stop()
+        localStream.value.removeTrack(track)
+      })
+    }
+    isVideoActive.value = false
+    mediaStore.setCameraOff(true)
+    if (previewVideoEl.value) {
+      previewVideoEl.value.srcObject = null
+    }
+  } else {
+    // 重新开启摄像头预览
+    try {
+      const constraints = {
+        video: mediaStore.selectedVideoInputId
+          ? {
+              deviceId: { exact: mediaStore.selectedVideoInputId },
+              width: { ideal: 1280, max: 1920 },
+              height: { ideal: 720, max: 1080 }
+            }
+          : { width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } },
+        audio: false
+      }
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints)
+      const newTrack = newStream.getVideoTracks()[0]
+      if (newTrack) {
+        if (localStream.value) {
+          localStream.value.addTrack(newTrack)
+        } else {
+          localStream.value = newStream
+        }
+        isVideoActive.value = true
+        mediaStore.setCameraOff(false)
+        await nextTick()
+        if (previewVideoEl.value) {
+          previewVideoEl.value.srcObject = localStream.value
+        }
+      }
+    } catch (e) {
+      console.error('开启摄像头预览失败:', e)
+      message.error('无法启动摄像头预览，请检查设备与权限')
+    }
+  }
 }
 
 onMounted(() => {
-  initSettingsPreview()
+  if (activeTab.value === 'media') {
+    initSettingsPreview()
+  }
   fetchLatestUserInfo()
 })
 
 onUnmounted(() => {
-  stopMicMeter()
-  stopLocalStream()
-  if (previewVideoEl.value) {
-    previewVideoEl.value.srcObject = null
-  }
+  stopSettingsPreview()
 })
 </script>
 

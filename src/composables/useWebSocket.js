@@ -53,62 +53,122 @@ export function useWebSocket() {
   }
 
   /**
-   * 建立 WebSocket 连接
+   * 获取动态自适应的 WebSocket 服务端 URL
+   */
+  function getWsUrl(token) {
+    let base = import.meta.env.VITE_WS_URL
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+    const defaultProto = isHttps ? 'wss:' : 'ws:'
+    const fullHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8182'
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+
+    // 1. 如果在生产/线上环境（特别是开启了 HTTPS，或者同源通过 Nginx /ws 代理）
+    if (isHttps || !base || base === '/ws' || base.startsWith('/') || base.includes(':8182')) {
+      base = `${defaultProto}//${fullHost}/ws`
+    } else if (base.includes('localhost') && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      // 局域网其它设备访问开发环境时，自动将 localhost 替换为当前访问的局域网 IP
+      base = base.replace('localhost', hostname)
+    }
+
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}token=${encodeURIComponent(token)}`
+  }
+
+  /**
+   * 建立 WebSocket 连接（返回 Promise，可 await 确保握手成功）
    * @param {string} customToken 
+   * @returns {Promise<WebSocket>}
    */
   function connect(customToken) {
     const token = customToken || authStore.token
     if (!token) {
       console.warn('缺少 Token，暂缓连接 WebSocket')
-      return
+      return Promise.reject(new Error('未登录或缺少 Token'))
     }
 
-    if (socket.value && (socket.value.readyState === WebSocket.OPEN || socket.value.readyState === WebSocket.CONNECTING)) {
-      return
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      return Promise.resolve(socket.value)
     }
 
-    // 后端 Netty 端口 7002，路径 /ws?token=...
-    let wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:7002/ws'
-    if (!wsUrl.includes('token=')) {
-      const sep = wsUrl.includes('?') ? '&' : '?'
-      wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(token)}`
+    if (socket.value && socket.value.readyState === WebSocket.CONNECTING) {
+      return new Promise((resolve, reject) => {
+        const checkTimer = setInterval(() => {
+          if (!socket.value) {
+            clearInterval(checkTimer)
+            reject(new Error('WebSocket 实例已销毁'))
+          } else if (socket.value.readyState === WebSocket.OPEN) {
+            clearInterval(checkTimer)
+            resolve(socket.value)
+          } else if (socket.value.readyState === WebSocket.CLOSED) {
+            clearInterval(checkTimer)
+            reject(new Error('WebSocket 连接关闭'))
+          }
+        }, 100)
+      })
     }
 
-    try {
-      socket.value = new WebSocket(wsUrl)
+    return new Promise((resolve, reject) => {
+      let isResolved = false
+      const wsUrl = getWsUrl(token)
 
-      socket.value.onopen = () => {
-        isConnected.value = true
-        isReconnecting.value = false
-        reconnectCount = 0
-        console.log('✅ WebSocket 信令连接已建立')
-        startHeartbeat()
-        emit('open')
-      }
-
-      socket.value.onmessage = (event) => {
-        handleRawMessage(event.data)
-      }
-
-      socket.value.onerror = (err) => {
-        console.error('❌ WebSocket 发生异常:', err)
-        emit('error', err)
-      }
-
-      socket.value.onclose = (event) => {
-        isConnected.value = false
-        stopHeartbeat()
-        console.warn('⚠️ WebSocket 已断开连接, code:', event.code, 'reason:', event.reason)
-        emit('close', event)
-
-        // 非主动关闭且未超限时触发重连
-        if (event.code !== 1000 && reconnectCount < MAX_RECONNECT_ATTEMPTS && authStore.isLoggedIn) {
-          scheduleReconnect()
+      // 8秒连接超时保护
+      const connectTimeout = setTimeout(() => {
+        if (!isResolved && socket.value && socket.value.readyState !== WebSocket.OPEN) {
+          console.warn('WebSocket 连接超时，转为后台重试')
+          // 不强制 reject 阻断页面，但提示未准备好
+          resolve(socket.value)
         }
+      }, 8000)
+
+      try {
+        socket.value = new WebSocket(wsUrl)
+
+        socket.value.onopen = () => {
+          clearTimeout(connectTimeout)
+          isConnected.value = true
+          isReconnecting.value = false
+          reconnectCount = 0
+          console.log('✅ WebSocket 信令连接已建立')
+          startHeartbeat()
+          emit('open')
+          if (!isResolved) {
+            isResolved = true
+            resolve(socket.value)
+          }
+        }
+
+        socket.value.onmessage = (event) => {
+          handleRawMessage(event.data)
+        }
+
+        socket.value.onerror = (err) => {
+          console.error('❌ WebSocket 发生异常:', err)
+          emit('error', err)
+          if (!isResolved) {
+            isResolved = true
+            // 发生异常时也允许流程向下走，避免阻塞整个页面初始化
+            resolve(socket.value)
+          }
+        }
+
+        socket.value.onclose = (event) => {
+          clearTimeout(connectTimeout)
+          isConnected.value = false
+          stopHeartbeat()
+          console.warn('⚠️ WebSocket 已断开连接, code:', event.code, 'reason:', event.reason)
+          emit('close', event)
+
+          // 非主动关闭且未超限时触发重连
+          if (event.code !== 1000 && reconnectCount < MAX_RECONNECT_ATTEMPTS && authStore.isLoggedIn) {
+            scheduleReconnect()
+          }
+        }
+      } catch (err) {
+        clearTimeout(connectTimeout)
+        console.error('创建 WebSocket 实例失败:', err)
+        reject(err)
       }
-    } catch (err) {
-      console.error('创建 WebSocket 实例失败:', err)
-    }
+    })
   }
 
   /**

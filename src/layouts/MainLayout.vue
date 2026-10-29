@@ -47,8 +47,11 @@
               <a-menu-item key="user-id">
                 <span style="color: var(--text-secondary); font-size: 12px">账号ID: {{ authStore.userId }}</span>
               </a-menu-item>
-              <a-menu-item key="settings" @click="router.push('/settings')">
-                <SettingOutlined /> 系统设置
+              <a-menu-item key="profile" @click="router.push('/settings?tab=profile')">
+                <UserOutlined /> 个人资料
+              </a-menu-item>
+              <a-menu-item key="settings" @click="router.push('/settings?tab=media')">
+                <SettingOutlined /> 音视频设置
               </a-menu-item>
               <a-menu-divider />
               <a-menu-item key="logout" @click="handleLogout">
@@ -108,6 +111,7 @@ import {
   HistoryOutlined,
   TeamOutlined,
   SettingOutlined,
+  UserOutlined,
   VideoCameraFilled,
   VideoCameraOutlined,
   LogoutOutlined
