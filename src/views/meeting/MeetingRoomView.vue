@@ -45,14 +45,82 @@
     </header>
 
     <!-- 中间核心视频网格舞台工作区 -->
-    <main class="room-video-stage">
+    <main class="room-video-stage" ref="stageContainerRef">
       <!-- 加载中遮罩状态 -->
       <div v-if="joiningMeeting" class="stage-overlay">
         <a-spin size="large" />
         <span class="overlay-text">{{ loadingTip }}</span>
       </div>
 
-      <!-- 动态响应式视频网格布局 -->
+      <!-- 模式 A：屏幕共享模式 (主要内容显示屏幕共享，右下角小边框显示摄像头画面) -->
+      <div v-else-if="isAnyScreenSharing" class="screen-share-stage-wrapper">
+        <ScreenSharePlayer
+          :stream="activeScreenStream"
+          :sharer="activeScreenSharer"
+          :is-self="isScreenSharing"
+          :is-fullscreen="isStageFullscreen"
+          @stop="handleToggleScreenShare"
+          @toggle-fullscreen="toggleStageFullscreen"
+        />
+
+        <!-- 右下角小边框：摄像头画中画 (PIP) 浮窗 -->
+        <div
+          class="pip-camera-box"
+          :class="{ minimized: isPipMinimized }"
+        >
+          <!-- 悬浮窗标题栏 -->
+          <div class="pip-header">
+            <div class="pip-title ellipsis">
+              <CameraOutlined style="font-size: 13px" />
+              <span class="ellipsis">{{ pipMemberMeta?.nickName || '摄像头' }}</span>
+              <span v-if="pipMemberIsSelf" class="pip-tag">(我)</span>
+            </div>
+            <div class="pip-controls">
+              <!-- 多成员画面切换 -->
+              <a-dropdown v-if="availablePipMembers.length > 1" placement="bottomRight">
+                <a-button type="text" size="small" class="pip-icon-btn" title="切换参会人摄像头">
+                  <SwapOutlined />
+                </a-button>
+                <template #overlay>
+                  <a-menu @click="handleSelectPipMember">
+                    <a-menu-item
+                      v-for="m in availablePipMembers"
+                      :key="m.userId"
+                      :class="{ 'ant-dropdown-menu-item-selected': currentPipUserId === m.userId }"
+                    >
+                      <span>{{ m.nickName }} {{ m.userId === authStore.userId ? '(我)' : '' }}</span>
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+
+              <!-- 最小化/展开 -->
+              <a-button
+                type="text"
+                size="small"
+                class="pip-icon-btn"
+                :title="isPipMinimized ? '展开摄像头' : '最小化'"
+                @click="isPipMinimized = !isPipMinimized"
+              >
+                <component :is="isPipMinimized ? UpOutlined : DownOutlined" />
+              </a-button>
+            </div>
+          </div>
+
+          <!-- 悬浮窗摄像头画面主体 -->
+          <div v-show="!isPipMinimized" class="pip-body">
+            <VideoTile
+              :member="pipMemberMeta"
+              :stream="pipStream"
+              :is-self="pipMemberIsSelf"
+              :is-host="pipMemberMeta?.userId === meetingStore.meetingInfo?.createUserId"
+              :is-pip="true"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- 模式 B：标准多方视频网格布局 (无屏幕共享时) -->
       <div
         v-else
         class="video-grid"
@@ -129,14 +197,22 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
   ClockCircleOutlined,
   CopyOutlined,
   SettingOutlined,
-  ShareAltOutlined
+  ShareAltOutlined,
+  DesktopOutlined,
+  StopOutlined,
+  CameraOutlined,
+  SwapOutlined,
+  UpOutlined,
+  DownOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMeetingStore } from '@/stores/meeting'
@@ -154,6 +230,7 @@ import {
 } from '@/api/meeting'
 import { formatMeetingNo, formatDuration, copyText } from '@/utils/format'
 import VideoTile from '@/components/meeting/VideoTile.vue'
+import ScreenSharePlayer from '@/components/meeting/ScreenSharePlayer.vue'
 import MeetingToolbar from '@/components/meeting/MeetingToolbar.vue'
 import ParticipantDrawer from '@/components/meeting/ParticipantDrawer.vue'
 import ChatDrawer from '@/components/meeting/ChatDrawer.vue'
@@ -174,6 +251,12 @@ const chatOpen = ref(false)
 const deviceModalOpen = ref(false)
 const inviteModalOpen = ref(false)
 const unreadChatCount = ref(0)
+
+// 屏幕共享与画中画 (PIP) 状态控制
+const stageContainerRef = ref(null)
+const isStageFullscreen = ref(false)
+const isPipMinimized = ref(false)
+const selectedPipUserId = ref(null)
 
 // 1. 初始化媒体设备管理
 const {
@@ -220,6 +303,87 @@ const localMemberMeta = computed(() => {
     screenShare: isScreenSharing.value
   }
 })
+
+// 是否有任意参会人在共享屏幕 (本地开启共享 或 远端成员开启共享)
+const isAnyScreenSharing = computed(() => {
+  return isScreenSharing.value || !!meetingStore.screenSharer
+})
+
+// 共享屏幕发起者元信息
+const activeScreenSharer = computed(() => {
+  if (isScreenSharing.value) {
+    return localMemberMeta.value
+  }
+  return meetingStore.screenSharer
+})
+
+// 屏幕共享视频流：若自己共享取 screenStream，若远端成员共享取 WebRTC 远端流
+const activeScreenStream = computed(() => {
+  if (isScreenSharing.value) {
+    return screenStream.value
+  }
+  const sharer = meetingStore.screenSharer
+  if (sharer && rtcRemoteStreams[sharer.userId]) {
+    return rtcRemoteStreams[sharer.userId]
+  }
+  return null
+})
+
+// 画中画 (PIP) 摄像头可选成员 (包含自身及所有远端成员)
+const availablePipMembers = computed(() => {
+  return [
+    localMemberMeta.value,
+    ...meetingStore.remoteMemberList
+  ]
+})
+
+// 当前在 PIP 小边框中显示的参会者 ID (默认显示自己)
+const currentPipUserId = computed(() => {
+  if (selectedPipUserId.value) {
+    const exists = availablePipMembers.value.some((m) => m.userId === selectedPipUserId.value)
+    if (exists) return selectedPipUserId.value
+  }
+  return authStore.userId
+})
+
+const pipMemberIsSelf = computed(() => {
+  return currentPipUserId.value === authStore.userId
+})
+
+const pipMemberMeta = computed(() => {
+  if (pipMemberIsSelf.value) {
+    return localMemberMeta.value
+  }
+  return meetingStore.remoteMemberList.find((m) => m.userId === currentPipUserId.value) || null
+})
+
+const pipStream = computed(() => {
+  if (pipMemberIsSelf.value) {
+    return localStream.value
+  }
+  return rtcRemoteStreams[currentPipUserId.value] || null
+})
+
+function handleSelectPipMember({ key }) {
+  selectedPipUserId.value = key
+}
+
+function toggleStageFullscreen() {
+  if (!stageContainerRef.value) return
+  if (!document.fullscreenElement) {
+    stageContainerRef.value.requestFullscreen?.().catch((err) => {
+      console.warn('全屏请求失败:', err)
+    })
+  } else {
+    document.exitFullscreen?.().catch((err) => {
+      console.warn('退出全屏失败:', err)
+    })
+  }
+}
+
+function handleFullscreenChange() {
+  isStageFullscreen.value = !!document.fullscreenElement
+}
 
 // 根据参会人数动态计算网格布局类名
 const gridClass = computed(() => {
@@ -386,17 +550,22 @@ async function handleToggleScreenShare() {
   if (isScreenSharing.value) {
     // 停止共享
     stopScreenShare()
+    meetingStore.updateMemberMedia(authStore.userId, { screenShare: false })
     await revertVideoTrack()
   } else {
     // 开启共享
     try {
       const stream = await startScreenShare(async () => {
         // 用户点击浏览器原生停止共享按钮时的回调
+        meetingStore.updateMemberMedia(authStore.userId, { screenShare: false })
         await revertVideoTrack()
       })
 
       const screenTrack = stream.getVideoTracks()[0]
       if (screenTrack) {
+        // 更新本地 store 状态
+        meetingStore.updateMemberMedia(authStore.userId, { screenShare: true })
+
         // 将所有对端 PeerConnection 中的视频轨道无缝替换为屏幕共享轨道
         await replaceTrackForAllPeers(screenTrack, 'video')
 
@@ -418,6 +587,7 @@ async function handleToggleScreenShare() {
 
 // 恢复摄像头视频轨道
 async function revertVideoTrack() {
+  meetingStore.updateMemberMedia(authStore.userId, { screenShare: false })
   const camTrack = localStream.value?.getVideoTracks()[0] || null
   if (camTrack) {
     await replaceTrackForAllPeers(camTrack, 'video')
@@ -487,9 +657,11 @@ async function handleCopyMeetingNo() {
 
 onMounted(() => {
   initMeetingRoom()
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
   stopAllTracks()
   closeAllPeers()
   disconnectWs()
@@ -673,6 +845,91 @@ onUnmounted(() => {
 
 .video-grid.grid-many {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+/* 屏幕共享舞台外层包装 */
+.screen-share-stage-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+/* 右下角小边框画中画 (PIP) 浮窗 */
+.pip-camera-box {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 280px;
+  height: 180px;
+  background: #1e1f26;
+  border: 2px solid #1677ff;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 30;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pip-camera-box.minimized {
+  height: 38px;
+  width: 200px;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.pip-header {
+  height: 36px;
+  min-height: 36px;
+  background: rgba(18, 19, 24, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+.pip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  max-width: 160px;
+}
+
+.pip-tag {
+  color: #1677ff;
+  font-weight: 500;
+}
+
+.pip-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pip-icon-btn {
+  color: rgba(255, 255, 255, 0.7);
+  padding: 2px 4px;
+  height: 24px;
+}
+
+.pip-icon-btn:hover {
+  color: #ffffff;
+}
+
+.pip-body {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  height: calc(100% - 36px);
+  background: #000000;
+  overflow: hidden;
 }
 </style>
 

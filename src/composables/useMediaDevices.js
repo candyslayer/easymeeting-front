@@ -176,7 +176,9 @@ export function useMediaDevices() {
           cursor: 'always',
           frameRate: { ideal: 15, max: 30 }
         },
-        audio: false // 大多数会议场景避免回声，默认不抓取系统音频
+        audio: false, // 大多数会议场景避免回声，默认不抓取系统音频
+        selfBrowserSurface: 'exclude', // 提示浏览器优先推荐外部窗口或屏幕，避免选中自身产生死循环镜像
+        surfaceSwitching: 'include'
       })
 
       screenStream.value = stream

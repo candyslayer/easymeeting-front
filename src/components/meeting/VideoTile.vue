@@ -4,7 +4,8 @@
     :class="{
       'is-self': isSelf,
       'is-screenshare': isScreenShare,
-      'no-video': !hasVideo
+      'no-video': !hasVideo,
+      'pip-mode': isPip
     }"
   >
     <!-- 真实视频画面流 -->
@@ -74,6 +75,10 @@ const props = defineProps({
     default: false
   },
   isHost: {
+    type: Boolean,
+    default: false
+  },
+  isPip: {
     type: Boolean,
     default: false
   }
@@ -265,6 +270,42 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 画中画小边框模式特殊紧凑样式 */
+.video-tile.pip-mode {
+  border-radius: 0;
+  border: none;
+}
+
+.video-tile.pip-mode .avatar-circle {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+}
+
+.video-tile.pip-mode .avatar-fallback {
+  gap: 6px;
+}
+
+.video-tile.pip-mode .fallback-name {
+  font-size: 12px;
+}
+
+.video-tile.pip-mode .mic-muted-tip {
+  font-size: 10px;
+}
+
+.video-tile.pip-mode .tile-bottom-bar {
+  padding: 4px 8px;
+}
+
+.video-tile.pip-mode .user-name {
+  font-size: 11px;
+}
+
+.video-tile.pip-mode .mic-icon {
+  font-size: 12px;
 }
 </style>
 
