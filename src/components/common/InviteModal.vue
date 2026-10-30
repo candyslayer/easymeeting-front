@@ -285,5 +285,22 @@ function handleClose() {
   align-items: center;
   gap: 16px;
 }
+
+@media (max-width: 540px) {
+  .info-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .label {
+    width: 100%;
+  }
+
+  .link-text {
+    max-width: 100%;
+    word-break: break-all;
+  }
+}
 </style>
 

@@ -263,5 +263,79 @@ const emit = defineEmits([
 .leave-btn.host-leave:hover {
   background-color: #e02424;
 }
+
+/* 移动端响应式控制栏适配 */
+@media (max-width: 768px) {
+  .meeting-toolbar {
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 8px env(safe-area-inset-bottom, 6px) 8px;
+  }
+
+  .toolbar-section {
+    gap: 4px;
+  }
+
+  .section-center {
+    gap: 6px;
+  }
+
+  .tool-btn {
+    min-width: 48px;
+    height: 48px;
+    padding: 2px 4px;
+    gap: 2px;
+  }
+
+  .tool-icon {
+    font-size: 18px;
+  }
+
+  .tool-label {
+    font-size: 10px;
+    transform: scale(0.92);
+  }
+
+  .leave-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 540px) {
+  .section-left {
+    display: none; /* 移动小屏隐藏工具栏左侧按钮，由顶部状态栏的邀请和设备入口承担 */
+  }
+
+  .section-center {
+    flex: 1;
+    justify-content: space-around;
+    gap: 2px;
+  }
+
+  .tool-btn {
+    min-width: 42px;
+    height: 46px;
+    padding: 2px;
+  }
+
+  .tool-icon {
+    font-size: 17px;
+  }
+
+  .tool-label {
+    font-size: 9px;
+    transform: scale(0.88);
+  }
+
+  .leave-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+    gap: 2px;
+  }
+
+  .leave-btn span {
+    font-size: 11px;
+  }
+}
 </style>
 

@@ -46,6 +46,7 @@
         :columns="columns"
         :loading="loading"
         :pagination="tablePagination"
+        :scroll="{ x: 750 }"
         row-key="meetingId"
         size="middle"
         @change="handleTableChange"
@@ -569,5 +570,31 @@ onMounted(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+@media (max-width: 768px) {
+  .history-card {
+    padding: 16px 12px;
+    border-radius: var(--border-radius-base);
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .header-right {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-right :deep(.ant-input-search) {
+    width: 100% !important;
+  }
+
+  .header-right .ant-btn {
+    flex: 1;
+  }
 }
 </style>

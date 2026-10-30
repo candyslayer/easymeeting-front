@@ -69,6 +69,11 @@
       <!-- 顶部轻量应用栏 -->
       <header class="top-header">
         <div class="header-left">
+          <!-- 移动端轻量 Logo -->
+          <div class="mobile-logo-brand">
+            <VideoCameraFilled class="mobile-brand-icon" />
+            <span class="mobile-brand-title">EasyMeeting</span>
+          </div>
           <h2 class="view-title">{{ currentRoute.meta.title?.split(' - ')[0] || '会议系统' }}</h2>
         </div>
         <div class="header-right">
@@ -81,10 +86,43 @@
             class="ongoing-meeting-pill"
             @click="returnToCurrentMeeting"
           >
-            <VideoCameraOutlined /> 您有进行中的会议 (点击进入)
+            <VideoCameraOutlined />
+            <span class="ongoing-pill-text">有进行中会议</span>
           </a-button>
 
-          <a-tooltip title="系统设置">
+          <!-- 移动端右上角用户头像下拉快捷入口 -->
+          <div class="mobile-user-dropdown">
+            <a-dropdown placement="bottomRight" :trigger="['click']">
+              <a-avatar
+                :size="30"
+                :src="getAvatarUrl(authStore.userId)"
+                :style="{ backgroundColor: '#1677ff', cursor: 'pointer' }"
+              >
+                {{ authStore.nickName?.slice(0, 1) || '用' }}
+              </a-avatar>
+              <template #overlay>
+                <a-menu>
+                  <a-menu-item key="user-id">
+                    <span style="color: var(--text-secondary); font-size: 12px">账号: {{ authStore.nickName }} (ID: {{ authStore.userId }})</span>
+                  </a-menu-item>
+                  <a-menu-item key="profile" @click="router.push('/settings?tab=profile')">
+                    <UserOutlined /> 个人资料
+                  </a-menu-item>
+                  <a-menu-item key="settings" @click="router.push('/settings?tab=media')">
+                    <SettingOutlined /> 音视频设置
+                  </a-menu-item>
+                  <a-menu-divider />
+                  <a-menu-item key="logout" @click="handleLogout">
+                    <LogoutOutlined style="color: #ff4d4f" />
+                    <span style="color: #ff4d4f">退出登录</span>
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+          </div>
+
+          <!-- 桌面端设置图标 -->
+          <a-tooltip title="系统设置" class="desktop-settings-btn">
             <a-button type="text" shape="circle" @click="router.push('/settings')">
               <SettingOutlined />
             </a-button>
@@ -96,6 +134,20 @@
       <section class="content-body">
         <router-view />
       </section>
+
+      <!-- 移动端底部悬浮导航栏 -->
+      <nav class="mobile-bottom-nav">
+        <router-link
+          v-for="item in navItems"
+          :key="item.path"
+          :to="item.path"
+          class="mobile-nav-item"
+          :class="{ active: currentRoute.path === item.path }"
+        >
+          <component :is="item.icon" class="mobile-nav-icon" />
+          <span class="mobile-nav-label">{{ item.label }}</span>
+        </router-link>
+      </nav>
     </main>
   </div>
 </template>
@@ -316,6 +368,29 @@ function handleLogout() {
   flex-shrink: 0;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-logo-brand {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-brand-icon {
+  font-size: 18px;
+  color: var(--primary-color);
+}
+
+.mobile-brand-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
 .view-title {
   font-size: 18px;
   font-weight: 600;
@@ -327,6 +402,10 @@ function handleLogout() {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.mobile-user-dropdown {
+  display: none;
 }
 
 .ongoing-meeting-pill {
@@ -349,6 +428,98 @@ function handleLogout() {
   flex: 1;
   overflow-y: auto;
   padding: 24px 28px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 移动端底部悬浮导航栏 */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
+  padding-bottom: var(--safe-area-bottom);
+  background: #ffffff;
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+  align-items: center;
+  justify-content: space-around;
+  user-select: none;
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  color: var(--text-secondary);
+  text-decoration: none;
+  gap: 2px;
+  transition: color 0.2s;
+  padding: 4px 0;
+}
+
+.mobile-nav-icon {
+  font-size: 18px;
+}
+
+.mobile-nav-label {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.mobile-nav-item.active {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.mobile-nav-item.active .mobile-nav-icon {
+  color: var(--primary-color);
+}
+
+/* 响应式断点适配：针对屏幕宽度 <= 768px 的平板与手机 */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+
+  .top-header {
+    padding: 0 14px;
+    height: 50px;
+  }
+
+  .mobile-logo-brand {
+    display: flex;
+  }
+
+  .view-title {
+    display: none;
+  }
+
+  .desktop-settings-btn {
+    display: none !important;
+  }
+
+  .mobile-user-dropdown {
+    display: flex;
+    align-items: center;
+  }
+
+  .content-body {
+    padding: 12px 12px calc(var(--mobile-nav-height) + var(--safe-area-bottom) + 12px) 12px;
+  }
+
+  .mobile-bottom-nav {
+    display: flex;
+  }
+
+  .ongoing-pill-text {
+    display: none;
+  }
 }
 </style>
 

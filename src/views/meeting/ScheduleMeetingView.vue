@@ -308,9 +308,39 @@ function resetForm() {
 }
 
 .schedule-container {
-  width: 680px;
+  width: 100%;
+  max-width: 680px;
   background: #ffffff;
   padding: 32px 36px;
+}
+
+@media (max-width: 768px) {
+  .schedule-container {
+    padding: 20px 16px;
+    border-radius: var(--border-radius-base);
+  }
+
+  .header-box {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+  }
+
+  .header-box .ant-btn {
+    width: 100%;
+  }
+
+  .pwd-group {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .pwd-group .ant-input {
+    width: 100% !important;
+  }
 }
 
 .header-box {

@@ -158,6 +158,7 @@
           :data-source="recentMeetings"
           :columns="historyColumns"
           :pagination="false"
+          :scroll="{ x: 560 }"
           row-key="meetingId"
           size="middle"
         >
@@ -627,6 +628,106 @@ onMounted(() => {
   font-family: monospace;
   font-weight: 600;
   color: var(--primary-color);
+}
+
+/* 移动端响应式断点适配 */
+@media (max-width: 768px) {
+  .home-view {
+    gap: 16px;
+  }
+
+  .welcome-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .welcome-left {
+    gap: 12px;
+  }
+
+  .welcome-left :deep(.ant-avatar) {
+    width: 48px !important;
+    height: 48px !important;
+    line-height: 48px !important;
+    font-size: 20px !important;
+  }
+
+  .greeting {
+    font-size: 17px;
+  }
+
+  .user-sub {
+    font-size: 11px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .welcome-right {
+    width: 100%;
+  }
+
+  .welcome-right .ant-btn {
+    width: 100%;
+  }
+
+  .action-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .action-card {
+    padding: 14px 16px;
+    gap: 14px;
+  }
+
+  .action-icon-wrapper {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    font-size: 22px;
+  }
+
+  .action-title {
+    font-size: 15px;
+  }
+
+  .action-desc {
+    font-size: 11px;
+  }
+
+  .meeting-item-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .item-left {
+    width: 100%;
+  }
+
+  .item-content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .item-meta {
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .item-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .recent-table-box {
+    padding: 0;
+  }
 }
 </style>
 

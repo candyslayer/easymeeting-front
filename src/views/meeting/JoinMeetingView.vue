@@ -263,10 +263,29 @@ onMounted(() => {
 }
 
 .join-card {
-  width: 480px;
+  width: 100%;
+  max-width: 480px;
   background: #ffffff;
   border-radius: var(--border-radius-lg);
   padding: 36px 36px 40px;
+}
+
+@media (max-width: 768px) {
+  .join-meeting-page {
+    min-height: auto;
+    padding: 10px 0;
+  }
+
+  .join-card {
+    padding: 24px 18px;
+    border-radius: var(--border-radius-base);
+  }
+
+  .checkbox-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
 }
 
 .join-header {

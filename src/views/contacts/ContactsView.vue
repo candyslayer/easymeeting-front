@@ -815,5 +815,77 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+@media (max-width: 768px) {
+  .contacts-card {
+    height: auto;
+    min-height: auto;
+    border-radius: var(--border-radius-base);
+  }
+
+  .contacts-layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .contacts-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .sidebar-header {
+    padding: 12px;
+  }
+
+  .category-menu {
+    flex-direction: row;
+    padding: 8px 12px;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .cat-item {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 10px;
+    font-size: 13px;
+    justify-content: center;
+  }
+
+  .contacts-main-content {
+    padding: 14px 12px;
+  }
+
+  .content-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .content-header :deep(.ant-input-search) {
+    width: 100% !important;
+  }
+
+  .contact-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .apply-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .apply-info-left {
+    width: 100%;
+  }
+
+  .deal-btns {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
 </style>
 

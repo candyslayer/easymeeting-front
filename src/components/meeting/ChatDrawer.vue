@@ -3,7 +3,7 @@
     v-model:open="visible"
     title="会议聊天"
     placement="right"
-    :width="360"
+    :width="drawerWidth"
     :body-style="{ padding: '12px 16px', display: 'flex', flexDirection: 'column', height: '100%' }"
     @close="emit('update:open', false)"
   >
@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
@@ -158,6 +158,21 @@ const fileInputEl = ref(null)
 const inputText = ref('')
 const targetUserId = ref('')
 const isUploading = ref(false)
+
+const windowWidth = ref(window.innerWidth)
+const drawerWidth = computed(() => (windowWidth.value <= 600 ? '100%' : 360))
+
+function handleResize() {
+  windowWidth.value = window.innerWidth
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
 
 const remoteMembers = computed(() => {
   return props.members.filter((m) => m.userId !== props.currentUserId)

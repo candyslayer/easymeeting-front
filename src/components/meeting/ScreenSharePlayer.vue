@@ -548,4 +548,34 @@ onUnmounted(() => {
   justify-content: center;
   z-index: 5;
 }
+
+@media (max-width: 540px) {
+  .floating-capsule-bar {
+    max-width: 95%;
+    padding: 0 10px;
+    gap: 8px;
+    top: 6px;
+  }
+
+  .capsule-text {
+    font-size: 11px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dashboard-card {
+    padding: 24px 16px;
+    margin: 0 10px;
+  }
+
+  .dashboard-title {
+    font-size: 18px;
+  }
+
+  .guide-badge {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+}
 </style>

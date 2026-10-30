@@ -266,5 +266,16 @@ onUnmounted(() => {
   color: var(--text-secondary);
   white-space: nowrap;
 }
+
+@media (max-width: 540px) {
+  .video-preview-box {
+    height: 180px;
+  }
+
+  .select-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
 </style>
 

@@ -349,5 +349,41 @@ onMounted(() => {
 .video-tile.pip-mode .mic-icon {
   font-size: 12px;
 }
+
+@media (max-width: 768px) {
+  .avatar-circle {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+
+  .avatar-fallback {
+    gap: 8px;
+  }
+
+  .fallback-name {
+    font-size: 13px;
+  }
+
+  .mic-muted-tip {
+    font-size: 10px;
+  }
+
+  .tile-bottom-bar {
+    padding: 4px 8px;
+  }
+
+  .user-name {
+    font-size: 11px;
+  }
+
+  .mic-icon {
+    font-size: 12px;
+  }
+
+  .host-tag, .self-tag {
+    font-size: 9px;
+  }
+}
 </style>
 

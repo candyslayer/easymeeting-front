@@ -327,7 +327,8 @@ onMounted(() => {
 }
 
 .register-card {
-  width: 480px;
+  width: 100%;
+  max-width: 480px;
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
@@ -420,6 +421,25 @@ onMounted(() => {
 .submit-btn {
   font-weight: 600;
   letter-spacing: 2px;
+}
+
+@media (max-width: 480px) {
+  .auth-page {
+    padding: 16px 12px;
+  }
+
+  .register-card {
+    padding: 24px 16px;
+    border-radius: 12px;
+  }
+
+  .brand-header {
+    margin-bottom: 18px;
+  }
+
+  .brand-title {
+    font-size: 18px;
+  }
 }
 </style>
 

@@ -3,7 +3,7 @@
     <div class="settings-card meeting-card">
       <h2 class="settings-title">系统与账号设置</h2>
 
-      <a-tabs v-model:activeKey="activeTab" tab-position="left" class="settings-tabs">
+      <a-tabs v-model:activeKey="activeTab" :tab-position="tabPosition" class="settings-tabs">
         <!-- 标签页 1：音视频设备调试 -->
         <a-tab-pane key="media" tab="音视频设备">
           <div class="tab-pane-container">
@@ -270,7 +270,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { CameraOutlined, UploadOutlined } from '@ant-design/icons-vue'
@@ -288,6 +288,14 @@ import { copyText } from '@/utils/format'
 const route = useRoute()
 const authStore = useAuthStore()
 const mediaStore = useMediaStore()
+
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+const tabPosition = computed(() => (isMobile.value ? 'top' : 'left'))
+
+function handleResize() {
+  windowWidth.value = window.innerWidth
+}
 
 const activeTab = ref(route.query.tab || 'media')
 const previewVideoEl = ref(null)
@@ -543,6 +551,7 @@ async function toggleVideoTest() {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', handleResize)
   if (activeTab.value === 'media') {
     initSettingsPreview()
   }
@@ -550,6 +559,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
   stopSettingsPreview()
 })
 </script>
@@ -681,5 +691,55 @@ onUnmounted(() => {
 .mono-text {
   font-family: monospace;
   font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .settings-card {
+    padding: 16px;
+    border-radius: var(--border-radius-base);
+    min-height: auto;
+  }
+
+  .settings-title {
+    font-size: 18px;
+    margin-bottom: 16px;
+  }
+
+  .settings-tabs :deep(.ant-tabs-nav) {
+    width: 100% !important;
+    margin-bottom: 14px;
+  }
+
+  .tab-pane-container {
+    padding-left: 0;
+  }
+
+  .camera-preview-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .video-preview-wrapper {
+    width: 100%;
+    max-width: 320px;
+    height: 180px;
+    margin: 0 auto;
+  }
+
+  .preview-actions {
+    width: 100%;
+  }
+
+  .preview-actions :deep(.ant-select) {
+    width: 100% !important;
+  }
+
+  .avatar-edit-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    max-width: 100%;
+  }
 }
 </style>

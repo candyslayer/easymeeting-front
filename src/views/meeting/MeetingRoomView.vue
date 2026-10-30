@@ -435,7 +435,7 @@ async function initMeetingRoom() {
 
     // 步骤 5：调用后端正式入会接口 /meeting/jionMeeting 广播给全员
     loadingTip.value = '正在加入会议房间...'
-    await jionMeeting(isVideoActive.value)
+    await jionMeeting(meetingId.value, isVideoActive.value)
 
     // 步骤 6：加载房间内已有的成员列表和历史聊天记录
     await refreshMemberList()
@@ -947,6 +947,97 @@ onUnmounted(() => {
   height: calc(100% - 36px);
   background: #000000;
   overflow: hidden;
+}
+
+/* 移动端会议室界面全套适配 */
+@media (max-width: 768px) {
+  .room-top-bar {
+    height: calc(48px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 4px) 10px 4px 10px;
+  }
+
+  .bar-left {
+    max-width: 55%;
+    gap: 6px;
+  }
+
+  .meeting-topic {
+    display: none; /* 移动端优先突出展示点击可复制的会议号 */
+  }
+
+  .meeting-no-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .timer-pill {
+    padding: 2px 8px;
+    font-size: 12px;
+  }
+
+  .conn-status-chip .status-text {
+    display: none; /* 移动端仅保留状态呼吸指示灯，节省空间 */
+  }
+
+  .bar-right {
+    gap: 6px;
+  }
+
+  .top-tool-btn {
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  .room-video-stage {
+    padding: 6px;
+  }
+
+  /* 竖屏视频排版优化：2人时上下分屏而非左右挤压 */
+  .video-grid.grid-2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, 1fr);
+    max-height: 100%;
+  }
+
+  .video-grid.grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+  }
+
+  .video-grid.grid-6,
+  .video-grid.grid-many {
+    grid-template-columns: repeat(2, 1fr);
+    overflow-y: auto;
+  }
+
+  /* 移动端画中画浮窗尺寸与位置适配 */
+  .pip-camera-box {
+    width: 130px;
+    height: 98px;
+    bottom: 12px;
+    right: 10px;
+    border-width: 1.5px;
+  }
+
+  .pip-camera-box.minimized {
+    width: 90px;
+    height: 30px;
+  }
+
+  .pip-header {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 6px;
+  }
+
+  .pip-title {
+    font-size: 10px;
+    max-width: 60px;
+  }
+
+  .pip-body {
+    height: calc(100% - 28px);
+  }
 }
 </style>
 

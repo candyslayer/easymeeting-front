@@ -39,11 +39,18 @@ export function prejoinMeeting(params) {
 /**
  * 正式加入会议房间并向全员广播
  * 注意：后端接口路径拼写为 /meeting/jionMeeting
+ * @param {string|boolean} meetingId 可选会议ID（或首参直接传 videoOpen）
  * @param {boolean} videoOpen 
  */
-export function jionMeeting(videoOpen = false) {
+export function jionMeeting(meetingId, videoOpen = false) {
+  let mId = meetingId
+  let vOpen = videoOpen
+  if (typeof meetingId === 'boolean') {
+    vOpen = meetingId
+    mId = undefined
+  }
   return http.post('/meeting/jionMeeting', null, {
-    params: { videoOpen }
+    params: { meetingId: mId, videoOpen: vOpen }
   })
 }
 

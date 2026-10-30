@@ -3,7 +3,7 @@
     v-model:open="visible"
     title="参会人员"
     placement="right"
-    :width="340"
+    :width="drawerWidth"
     :body-style="{ padding: '16px', display: 'flex', flexDirection: 'column' }"
     @close="emit('update:open', false)"
   >
@@ -98,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import {
   SearchOutlined,
@@ -138,6 +138,20 @@ const emit = defineEmits(['update:open'])
 
 const visible = ref(props.open)
 const searchKeyword = ref('')
+const windowWidth = ref(window.innerWidth)
+const drawerWidth = computed(() => (windowWidth.value <= 600 ? '100%' : 340))
+
+function handleResize() {
+  windowWidth.value = window.innerWidth
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
 
 watch(
   () => props.open,

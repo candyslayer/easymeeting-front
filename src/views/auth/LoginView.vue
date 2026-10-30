@@ -206,7 +206,8 @@ onMounted(() => {
 }
 
 .auth-card {
-  width: 440px;
+  width: 100%;
+  max-width: 440px;
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
@@ -297,6 +298,25 @@ onMounted(() => {
 .submit-btn {
   font-weight: 600;
   letter-spacing: 2px;
+}
+
+@media (max-width: 480px) {
+  .auth-page {
+    padding: 16px 12px;
+  }
+
+  .auth-card {
+    padding: 26px 18px;
+    border-radius: 12px;
+  }
+
+  .brand-header {
+    margin-bottom: 20px;
+  }
+
+  .brand-title {
+    font-size: 20px;
+  }
 }
 </style>
 
