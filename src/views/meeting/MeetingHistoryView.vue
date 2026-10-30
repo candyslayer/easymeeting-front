@@ -76,11 +76,19 @@
             </div>
           </template>
 
-          <!-- 计划/开始时间 -->
+          <!-- 计划/开始时间与时长 -->
           <template v-else-if="column.key === 'startTime'">
             <div class="time-cell">
               <span class="time-main">{{ formatDateTime(record.startTime) || formatDateTime(record.createTime) }}</span>
-              <span v-if="record.endTime" class="time-sub">至 {{ formatDateTime(record.endTime) }}</span>
+              <span v-if="record.endTime" class="time-sub">至 {{ formatDateTime(record.endTime) }} ({{ calculateDuration(record.startTime, record.endTime) }})</span>
+            </div>
+          </template>
+
+          <!-- 参会人数 -->
+          <template v-else-if="column.key === 'memberCount'">
+            <div class="member-count-cell">
+              <TeamOutlined style="color: #1677ff; margin-right: 4px" />
+              <span>{{ record.memberCount ?? 1 }} 人</span>
             </div>
           </template>
 
@@ -90,6 +98,16 @@
               <component :is="getStatusIcon(record)" />
               {{ getStatusLabel(record) }}
             </a-tag>
+          </template>
+
+          <!-- AI 分析 / 纪要状态 -->
+          <template v-else-if="column.key === 'aiStatus'">
+            <div class="ai-status-cell">
+              <a-tag :color="getAiStatusColor(record)">
+                <RobotOutlined style="margin-right: 4px" />
+                {{ getAiStatusLabel(record) }}
+              </a-tag>
+            </div>
           </template>
 
           <!-- 操作栏 -->
@@ -105,47 +123,57 @@
                 进入会议
               </a-button>
 
-              <!-- 已结束会议：再开一场 -->
+              <!-- AI 工作台直接入口 -->
               <a-button
-                v-else
-                type="link"
+                type="primary"
+                ghost
                 size="small"
-                @click="relaunchMeeting(record)"
+                @click="goToAiWorkspace(record)"
               >
-                再开一场
+                <RobotOutlined /> AI 工作台
               </a-button>
 
-              <!-- 邀请成员 -->
-              <a-button
-                type="link"
-                size="small"
-                @click="openInvite(record)"
-              >
-                邀请
-              </a-button>
-
-              <!-- 我创建的未结束预约会议：允许调整时间 -->
-              <a-button
-                v-if="record.status === 0 && record.createUserId === authStore.userId"
-                type="link"
-                size="small"
-                @click="openTimeModal(record)"
-              >
-                改期
-              </a-button>
-
-              <!-- 删除/取消预约 -->
-              <a-popconfirm
-                :title="record.status === 0 ? '确定取消该预约会议吗？' : '确定从历史记录中移除该会议吗？'"
-                ok-text="确认删除"
-                cancel-text="取消"
-                ok-type="danger"
-                @confirm="handleDeleteMeeting(record)"
-              >
-                <a-button type="link" danger size="small">
-                  删除
+              <!-- 更多下拉操作 -->
+              <a-dropdown placement="bottomRight">
+                <a-button size="small">
+                  更多 <DownOutlined style="font-size: 10px" />
                 </a-button>
-              </a-popconfirm>
+                <template #overlay>
+                  <a-menu>
+                    <a-menu-item key="minutes" @click="goToAiWorkspace(record, 'minutes')">
+                      <FileTextOutlined /> 查看会议纪要
+                    </a-menu-item>
+                    <a-menu-item key="analyze" @click="handleTriggerAiAnalysis(record)">
+                      <SyncOutlined /> 生成/重析纪要
+                    </a-menu-item>
+                    <a-menu-item key="decisions" @click="goToAiWorkspace(record, 'decisions')">
+                      <CheckCircleOutlined /> 查看会议决策
+                    </a-menu-item>
+                    <a-menu-item key="actionItems" @click="goToAiWorkspace(record, 'actionItems')">
+                      <UnorderedListOutlined /> 查看待办事项
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item v-if="record.status === 1" key="relaunch" @click="relaunchMeeting(record)">
+                      <ReloadOutlined /> 再开一场
+                    </a-menu-item>
+                    <a-menu-item key="invite" @click="openInvite(record)">
+                      <ShareAltOutlined /> 邀请成员
+                    </a-menu-item>
+                    <a-menu-item
+                      v-if="record.status === 0 && record.createUserId === authStore.userId"
+                      key="reschedule"
+                      @click="openTimeModal(record)"
+                    >
+                      <ClockCircleOutlined /> 改期
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="del" danger @click="confirmDelete(record)">
+                      <DeleteOutlined style="color: #ff4d4f" />
+                      <span style="color: #ff4d4f">删除会议</span>
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
             </div>
           </template>
         </template>
@@ -162,7 +190,7 @@
     <a-modal
       v-model:open="timeModalOpen"
       title="调整预约会议时间"
-      width="480px"
+      :width="modalWidth(480)"
       :confirm-loading="updatingTime"
       @ok="handleUpdateTimeSubmit"
     >
@@ -193,9 +221,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
   ReloadOutlined,
@@ -203,7 +231,14 @@ import {
   PlusOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
-  SyncOutlined
+  SyncOutlined,
+  RobotOutlined,
+  DownOutlined,
+  FileTextOutlined,
+  UnorderedListOutlined,
+  DeleteOutlined,
+  ShareAltOutlined,
+  TeamOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -213,6 +248,10 @@ import {
   delMeeting,
   updateMeetingTime
 } from '@/api/meeting'
+import {
+  getMeetingMinutes,
+  startAnalysis
+} from '@/api/meetingAi'
 import { formatMeetingNo, formatDateTime, copyText } from '@/utils/format'
 import InviteModal from '@/components/common/InviteModal.vue'
 
@@ -226,11 +265,20 @@ const searchKeyword = ref('')
 const activeTab = ref('all') // 'all' | 'scheduled' | 'finished'
 const inviteModalOpen = ref(false)
 const selectedMeeting = ref({})
+const aiStatusMap = reactive({}) // meetingId -> { status, version, title, isAnalyzing }
 
 // 修改时间弹窗状态
 const timeModalOpen = ref(false)
 const activeTimeMeeting = ref(null)
 const updatingTime = ref(false)
+
+const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)
+function onWindowResize() {
+  windowWidth.value = window.innerWidth
+}
+function modalWidth(defaultWidth) {
+  return windowWidth.value < 640 ? '94vw' : `${defaultWidth}px`
+}
 const timeForm = reactive({
   range: [],
   changeReason: ''
@@ -244,10 +292,12 @@ const pagination = reactive({
 
 const columns = [
   { title: '会议主题', dataIndex: 'meetingName', key: 'meetingName' },
-  { title: '会议号', dataIndex: 'meetingNo', key: 'meetingNo', width: 160 },
-  { title: '计划开始时间', dataIndex: 'startTime', key: 'startTime', width: 200 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
-  { title: '操作', key: 'actions', width: 220, align: 'right' }
+  { title: '会议号', dataIndex: 'meetingNo', key: 'meetingNo', width: 140 },
+  { title: '会议时间与时长', dataIndex: 'startTime', key: 'startTime', width: 220 },
+  { title: '参会人数', dataIndex: 'memberCount', key: 'memberCount', width: 90 },
+  { title: '会议状态', dataIndex: 'status', key: 'status', width: 100 },
+  { title: 'AI 纪要状态', key: 'aiStatus', width: 120 },
+  { title: '操作', key: 'actions', width: 230, align: 'right' }
 ]
 
 const tablePagination = computed(() => ({
@@ -309,6 +359,110 @@ function getStatusLabel(record) {
   return '进行中'
 }
 
+function calculateDuration(start, end) {
+  if (!start) return '-'
+  const s = dayjs(start)
+  const e = end ? dayjs(end) : dayjs()
+  const diffMinutes = e.diff(s, 'minute')
+  if (diffMinutes < 1) return '< 1 分钟'
+  if (diffMinutes >= 60) {
+    const hours = Math.floor(diffMinutes / 60)
+    const mins = diffMinutes % 60
+    return `${hours} 小时 ${mins} 分钟`
+  }
+  return `${diffMinutes} 分钟`
+}
+
+function getAiStatusLabel(record) {
+  const info = aiStatusMap[record.meetingId]
+  if (!info) return '未生成'
+  if (info.isAnalyzing) return '分析中...'
+  switch (info.status) {
+    case 0:
+      return '草稿'
+    case 1:
+      return '待审核'
+    case 2:
+      return '已发布'
+    case 3:
+      return '历史归档'
+    default:
+      return '未生成'
+  }
+}
+
+function getAiStatusColor(record) {
+  const info = aiStatusMap[record.meetingId]
+  if (!info) return 'default'
+  if (info.isAnalyzing) return 'processing'
+  switch (info.status) {
+    case 0:
+      return 'warning'
+    case 1:
+      return 'processing'
+    case 2:
+      return 'success'
+    case 3:
+      return 'default'
+    default:
+      return 'default'
+  }
+}
+
+function goToAiWorkspace(record, tab = 'overview') {
+  router.push({
+    path: `/meeting/ai/${record.meetingId}`,
+    query: tab !== 'overview' ? { tab } : undefined
+  })
+}
+
+async function handleTriggerAiAnalysis(record) {
+  aiStatusMap[record.meetingId] = { isAnalyzing: true }
+  try {
+    await startAnalysis({
+      meetingId: record.meetingId,
+      targetLanguage: 'zh',
+      forceReanalyze: true
+    })
+    message.success('已触发 AI 多 Agent 分析流水线，正在前往工作台查看详情...')
+    goToAiWorkspace(record, 'agents')
+  } catch (err) {
+    message.error(err.message || '触发 AI 分析流水线失败')
+    delete aiStatusMap[record.meetingId]
+  }
+}
+
+function confirmDelete(record) {
+  Modal.confirm({
+    title: record.status === 0 ? '确定取消该预约会议吗？' : '确定从历史记录中移除该会议吗？',
+    content: `删除后会议「${record.meetingName || record.meetingNo}」将从列表中清除。`,
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: () => handleDeleteMeeting(record)
+  })
+}
+
+async function fetchAiStatusForList(list) {
+  if (!list || list.length === 0) return
+  // 异步静默查询各会议纪要状态，不阻断主表格渲染
+  list.forEach(async (item) => {
+    try {
+      const minutes = await getMeetingMinutes(item.meetingId)
+      if (minutes) {
+        aiStatusMap[item.meetingId] = {
+          status: minutes.status,
+          version: minutes.version,
+          title: minutes.title,
+          isAnalyzing: false
+        }
+      }
+    } catch (e) {
+      // 若无纪要或无权限，置空状态
+    }
+  })
+}
+
 async function fetchHistory(page = 1) {
   loading.value = true
   try {
@@ -341,6 +495,9 @@ async function fetchHistory(page = 1) {
     rawList.value = combinedList
     pagination.current = page
     pagination.totalCount = total
+
+    // 静默加载本页会议的 AI 纪要状态
+    fetchAiStatusForList(combinedList)
   } catch (err) {
     message.error(err.message || '获取会议记录失败')
   } finally {
@@ -441,7 +598,16 @@ watch(
 )
 
 onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', onWindowResize)
+  }
   fetchHistory(1)
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', onWindowResize)
+  }
 })
 </script>
 
@@ -570,6 +736,18 @@ onMounted(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.member-count-cell {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.ai-status-cell {
+  display: flex;
+  align-items: center;
 }
 
 @media (max-width: 768px) {

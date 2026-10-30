@@ -261,6 +261,15 @@ export function useWebSocket() {
           }
           break
 
+        case 20: // TRANSCRIPT_INCREMENTAL: 增量转写文本推送
+          emit('transcript_incremental', data.meesageContent || data)
+          break
+
+        case 22: // MINUTES_PUBLISHED: 会议纪要发布广播
+          message.info('当前会议已发布最新 AI 会议纪要')
+          emit('minutes_published', data.meesageContent || data)
+          break
+
         default:
           break
       }

@@ -70,6 +70,16 @@
         </a-badge>
         <span class="tool-label">聊天</span>
       </button>
+
+      <!-- AI 助手抽屉 -->
+      <button
+        class="tool-btn"
+        :class="{ active: isAiOpen }"
+        @click="emit('toggleAi')"
+      >
+        <RobotOutlined class="tool-icon" :style="{ color: isTranscribing ? '#52c41a' : undefined }" />
+        <span class="tool-label">AI 助手</span>
+      </button>
     </div>
 
     <!-- 右侧退出/结束会议区 -->
@@ -111,6 +121,7 @@ import {
   DesktopOutlined,
   TeamOutlined,
   MessageOutlined,
+  RobotOutlined,
   SettingOutlined,
   UserAddOutlined,
   PoweroffOutlined,
@@ -147,6 +158,14 @@ defineProps({
     type: Boolean,
     default: false
   },
+  isAiOpen: {
+    type: Boolean,
+    default: false
+  },
+  isTranscribing: {
+    type: Boolean,
+    default: false
+  },
   isHost: {
     type: Boolean,
     default: false
@@ -159,6 +178,7 @@ const emit = defineEmits([
   'toggleScreenShare',
   'toggleParticipants',
   'toggleChat',
+  'toggleAi',
   'openInvite',
   'openSettings',
   'exitMeeting',

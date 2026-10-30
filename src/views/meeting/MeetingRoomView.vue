@@ -34,6 +34,10 @@
           </span>
         </div>
 
+        <a-button type="text" size="small" class="top-tool-btn" @click="aiDrawerOpen = true">
+          <RobotOutlined /> AI 助手
+        </a-button>
+
         <a-button type="text" size="small" class="top-tool-btn" @click="inviteModalOpen = true">
           <ShareAltOutlined /> 邀请
         </a-button>
@@ -155,12 +159,14 @@
       :unread-chat-count="unreadChatCount"
       :is-participants-open="participantsOpen"
       :is-chat-open="chatOpen"
+      :is-ai-open="aiDrawerOpen"
       :is-host="meetingStore.isHost"
       @toggle-audio="handleToggleAudio"
       @toggle-video="handleToggleVideo"
       @toggle-screen-share="handleToggleScreenShare"
       @toggle-participants="participantsOpen = !participantsOpen"
       @toggle-chat="chatOpen = !chatOpen"
+      @toggle-ai="aiDrawerOpen = !aiDrawerOpen"
       @open-invite="inviteModalOpen = true"
       @open-settings="deviceModalOpen = true"
       @exit-meeting="handleExitMeeting"
@@ -183,6 +189,16 @@
       :members="meetingStore.memberList"
       :current-user-id="authStore.userId"
       :meeting-id="meetingId"
+    />
+
+    <!-- 右侧抽屉：AI 会议助手与实时转写 -->
+    <MeetingAiDrawer
+      v-model:open="aiDrawerOpen"
+      :meeting-id="meetingId"
+      :local-stream="localStream"
+      :remote-streams="rtcRemoteStreams"
+      :on-ws="onWs"
+      :is-host="meetingStore.isHost"
     />
 
     <!-- 音视频设备快速设置弹窗 -->
@@ -212,7 +228,8 @@ import {
   UpOutlined,
   DownOutlined,
   FullscreenOutlined,
-  FullscreenExitOutlined
+  FullscreenExitOutlined,
+  RobotOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMeetingStore } from '@/stores/meeting'
@@ -234,6 +251,7 @@ import ScreenSharePlayer from '@/components/meeting/ScreenSharePlayer.vue'
 import MeetingToolbar from '@/components/meeting/MeetingToolbar.vue'
 import ParticipantDrawer from '@/components/meeting/ParticipantDrawer.vue'
 import ChatDrawer from '@/components/meeting/ChatDrawer.vue'
+import MeetingAiDrawer from '@/components/meeting/MeetingAiDrawer.vue'
 import DeviceTestModal from '@/components/common/DeviceTestModal.vue'
 import InviteModal from '@/components/common/InviteModal.vue'
 
@@ -248,6 +266,7 @@ const joiningMeeting = ref(true)
 const loadingTip = ref('正在接入会议系统...')
 const participantsOpen = ref(false)
 const chatOpen = ref(false)
+const aiDrawerOpen = ref(false)
 const deviceModalOpen = ref(false)
 const inviteModalOpen = ref(false)
 const unreadChatCount = ref(0)

@@ -43,6 +43,12 @@ const routes = [
         meta: { title: '会议记录 - EasyMeeting' }
       },
       {
+        path: 'meeting/ai/:id',
+        name: 'MeetingAiWorkspace',
+        component: () => import('@/views/meeting/MeetingAiWorkspaceView.vue'),
+        meta: { title: 'AI 会议工作台 - EasyMeeting' }
+      },
+      {
         path: 'contacts',
         name: 'Contacts',
         component: () => import('@/views/contacts/ContactsView.vue'),
