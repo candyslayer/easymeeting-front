@@ -6,6 +6,16 @@
         <a-button type="text" class="back-btn" @click="handleGoBack">
           <ArrowLeftOutlined /> 返回会议列表
         </a-button>
+        <a-button
+          v-if="authStore.currentMeetingId"
+          type="primary"
+          danger
+          size="small"
+          class="ongoing-meeting-btn"
+          @click="router.push(`/meeting/room/${authStore.currentMeetingId}`)"
+        >
+          <VideoCameraOutlined /> 返回会议室
+        </a-button>
         <div class="divider"></div>
         <div class="meeting-title-wrap ellipsis">
           <span class="meeting-name ellipsis">{{ meetingInfo?.meetingName || '智能会议工作台' }}</span>
@@ -249,8 +259,10 @@ import {
   UnorderedListOutlined,
   QuestionCircleOutlined,
   ClusterOutlined,
-  RightOutlined
+  RightOutlined,
+  VideoCameraOutlined
 } from '@ant-design/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 import { useMeetingAiStore } from '@/stores/meetingAi'
 import { formatMeetingNo, formatDateTime } from '@/utils/format'
 import { loadMeetingHistory } from '@/api/meeting'
@@ -267,6 +279,7 @@ import AgentExecutionPanel from '@/components/meeting-ai/AgentExecutionPanel.vue
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const aiStore = useMeetingAiStore()
 
 const meetingId = computed(() => String(route.params.id || ''))

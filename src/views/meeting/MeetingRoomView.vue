@@ -38,6 +38,10 @@
           <RobotOutlined /> AI 助手
         </a-button>
 
+        <a-button type="text" size="small" class="top-tool-btn" @click="workspaceModalOpen = true">
+          <ClusterOutlined /> Agent 工作台
+        </a-button>
+
         <a-button type="text" size="small" class="top-tool-btn" @click="inviteModalOpen = true">
           <ShareAltOutlined /> 邀请
         </a-button>
@@ -209,12 +213,18 @@
       v-model:open="inviteModalOpen"
       :meeting-info="meetingStore.meetingInfo"
     />
+
+    <!-- 会内全屏/模态 Agent 智能工作台（保持音视频与信令不中断，绝不退出会议） -->
+    <MeetingAiWorkspaceModal
+      v-model:open="workspaceModalOpen"
+      :meeting-id="meetingId"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
   ClockCircleOutlined,
@@ -229,7 +239,8 @@ import {
   DownOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
-  RobotOutlined
+  RobotOutlined,
+  ClusterOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMeetingStore } from '@/stores/meeting'
@@ -252,6 +263,7 @@ import MeetingToolbar from '@/components/meeting/MeetingToolbar.vue'
 import ParticipantDrawer from '@/components/meeting/ParticipantDrawer.vue'
 import ChatDrawer from '@/components/meeting/ChatDrawer.vue'
 import MeetingAiDrawer from '@/components/meeting/MeetingAiDrawer.vue'
+import MeetingAiWorkspaceModal from '@/components/meeting-ai/MeetingAiWorkspaceModal.vue'
 import DeviceTestModal from '@/components/common/DeviceTestModal.vue'
 import InviteModal from '@/components/common/InviteModal.vue'
 
@@ -267,9 +279,20 @@ const loadingTip = ref('正在接入会议系统...')
 const participantsOpen = ref(false)
 const chatOpen = ref(false)
 const aiDrawerOpen = ref(false)
+const workspaceModalOpen = ref(false)
 const deviceModalOpen = ref(false)
 const inviteModalOpen = ref(false)
 const unreadChatCount = ref(0)
+
+// 路由守卫：防止会中因误点击外部 AI 工作台导致会议意外退出断开
+onBeforeRouteLeave((to, from, next) => {
+  if (to.path && to.path.startsWith('/meeting/ai/')) {
+    workspaceModalOpen.value = true
+    next(false)
+    return
+  }
+  next()
+})
 
 // 屏幕共享与画中画 (PIP) 状态控制
 const stageContainerRef = ref(null)

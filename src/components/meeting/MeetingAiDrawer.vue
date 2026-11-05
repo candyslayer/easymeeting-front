@@ -13,12 +13,17 @@
         <RobotOutlined style="color: #1677ff; font-size: 16px" />
         <span>Spring AI 多 Agent 会议助手</span>
       </div>
-      <a-button type="link" size="small" @click="openFullWorkspace">
-        打开完整工作台 <ExportOutlined />
-      </a-button>
+      <div class="banner-actions">
+        <a-button type="link" size="small" @click="openWorkspaceModal">
+          <FullscreenOutlined /> 全屏工作台
+        </a-button>
+        <a-button type="link" size="small" @click="openInExternalTab">
+          <ExportOutlined /> 新窗口
+        </a-button>
+      </div>
     </div>
 
-    <!-- 标签页导航：实时转写 / 会议纪要 / 快捷问答 -->
+    <!-- 标签页导航：实时转写 / Agent 控制台 / 会议纪要 / 核心议题 / 决策 / 待办 / 问答 -->
     <div class="drawer-tabs-header">
       <button
         class="d-tab-btn"
@@ -32,11 +37,48 @@
 
       <button
         class="d-tab-btn"
+        :class="{ active: activeTab === 'agents' }"
+        @click="activeTab = 'agents'"
+      >
+        <ClusterOutlined />
+        <span>Agent 控制台</span>
+        <span v-if="aiStore.isAnalyzing" class="badge-dot pulse"></span>
+      </button>
+
+      <button
+        class="d-tab-btn"
         :class="{ active: activeTab === 'minutes' }"
         @click="activeTab = 'minutes'"
       >
         <FileTextOutlined />
         <span>会议纪要</span>
+      </button>
+
+      <button
+        class="d-tab-btn"
+        :class="{ active: activeTab === 'topics' }"
+        @click="activeTab = 'topics'"
+      >
+        <OrderedListOutlined />
+        <span>核心议题</span>
+      </button>
+
+      <button
+        class="d-tab-btn"
+        :class="{ active: activeTab === 'decisions' }"
+        @click="activeTab = 'decisions'"
+      >
+        <CheckCircleOutlined />
+        <span>会议决策</span>
+      </button>
+
+      <button
+        class="d-tab-btn"
+        :class="{ active: activeTab === 'actionItems' }"
+        @click="activeTab = 'actionItems'"
+      >
+        <UnorderedListOutlined />
+        <span>待办事项</span>
       </button>
 
       <button
@@ -133,7 +175,27 @@
         </div>
       </div>
 
-      <!-- 3. 抽屉内智能问答面板 -->
+      <!-- 3. Agent 控制台与流水线审计 -->
+      <div v-show="activeTab === 'agents'" class="tab-panel agents-drawer-panel">
+        <AgentExecutionPanel :meeting-id="meetingId" />
+      </div>
+
+      <!-- 4. 核心议题面板 -->
+      <div v-show="activeTab === 'topics'" class="tab-panel topics-drawer-panel">
+        <TopicsPanel :meeting-id="meetingId" />
+      </div>
+
+      <!-- 5. 会议决策管理 -->
+      <div v-show="activeTab === 'decisions'" class="tab-panel decisions-drawer-panel">
+        <DecisionsPanel :meeting-id="meetingId" />
+      </div>
+
+      <!-- 6. 待办事项跟踪 -->
+      <div v-show="activeTab === 'actionItems'" class="tab-panel actions-drawer-panel">
+        <ActionItemsPanel :meeting-id="meetingId" />
+      </div>
+
+      <!-- 7. 抽屉内智能问答面板 -->
       <div v-show="activeTab === 'qa'" class="tab-panel qa-drawer-panel">
         <div class="qa-messages-box" ref="qaBoxRef">
           <div v-if="qaList.length === 0" class="qa-empty-hint">
@@ -177,6 +239,13 @@
       </div>
     </div>
   </a-drawer>
+
+  <!-- 全屏内置 Agent 智能工作台弹窗（保持当前会议连接，不退出会议） -->
+  <MeetingAiWorkspaceModal
+    v-model:open="workspaceModalOpen"
+    :meeting-id="meetingId"
+    :initial-tab="activeTab"
+  />
 </template>
 
 <script setup>
@@ -186,14 +255,24 @@ import { useRouter } from 'vue-router'
 import {
   RobotOutlined,
   ExportOutlined,
+  FullscreenOutlined,
   AudioOutlined,
   FileTextOutlined,
   QuestionCircleOutlined,
   PlayCircleOutlined,
   PoweroffOutlined,
   SyncOutlined,
-  CommentOutlined
+  CommentOutlined,
+  ClusterOutlined,
+  OrderedListOutlined,
+  CheckCircleOutlined,
+  UnorderedListOutlined
 } from '@ant-design/icons-vue'
+import MeetingAiWorkspaceModal from '@/components/meeting-ai/MeetingAiWorkspaceModal.vue'
+import AgentExecutionPanel from '@/components/meeting-ai/AgentExecutionPanel.vue'
+import TopicsPanel from '@/components/meeting-ai/TopicsPanel.vue'
+import DecisionsPanel from '@/components/meeting-ai/DecisionsPanel.vue'
+import ActionItemsPanel from '@/components/meeting-ai/ActionItemsPanel.vue'
 import {
   createRealtimeSession,
   streamAudioChunk,
@@ -239,10 +318,27 @@ const drawerWidth = computed(() => {
   if (typeof window !== 'undefined' && window.innerWidth < 640) {
     return '100%'
   }
-  return 420
+  return 480
 })
 
-const activeTab = ref('realtime') // 'realtime' | 'minutes' | 'qa'
+const activeTab = ref('realtime') // 'realtime' | 'agents' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'qa'
+const workspaceModalOpen = ref(false)
+
+function openWorkspaceModal() {
+  workspaceModalOpen.value = true
+}
+
+function openInExternalTab() {
+  const routeUrl = router.resolve(`/meeting/ai/${props.meetingId}`)
+  const fullUrl = window.location.origin + routeUrl.href
+  const newWin = window.open(fullUrl, '_blank', 'noopener,noreferrer')
+  if (!newWin || newWin.closed || typeof newWin.closed === 'undefined') {
+    workspaceModalOpen.value = true
+    message.info('当前浏览器阻止了新窗口弹出，已为您在当前会议内开启全屏工作台')
+  } else {
+    message.success('已在新标签页打开独立工作台，当前视频会议保持连接')
+  }
+}
 
 // 实时转写状态
 const isSessionActive = ref(false)
@@ -310,11 +406,6 @@ function formatMs(ms) {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-function openFullWorkspace() {
-  const url = router.resolve(`/meeting/ai/${props.meetingId}`).href
-  window.open(url, '_blank')
 }
 
 // 开启 / 停止实时转写
@@ -588,15 +679,29 @@ onUnmounted(() => {
   color: #1677ff;
 }
 
+.banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .drawer-tabs-header {
   display: flex;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   border-bottom: 1px solid var(--border-color);
   background: #fafafa;
 }
 
+.drawer-tabs-header::-webkit-scrollbar {
+  display: none;
+}
+
 .d-tab-btn {
-  flex: 1;
-  padding: 10px 0;
+  flex: 0 0 auto;
+  padding: 10px 12px;
   border: none;
   background: transparent;
   font-size: 13px;
@@ -605,7 +710,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   position: relative;
   transition: all 0.2s;
 }
@@ -622,6 +727,17 @@ onUnmounted(() => {
   height: 6px;
   border-radius: 50%;
   background: #52c41a;
+}
+
+.badge-dot.pulse {
+  background: #1677ff;
+  animation: pulse-badge-dot 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-badge-dot {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  50% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0.6; }
 }
 
 .drawer-content-body {
