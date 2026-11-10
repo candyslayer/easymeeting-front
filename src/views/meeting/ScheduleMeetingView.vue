@@ -86,6 +86,41 @@
           />
         </a-form-item>
 
+        <a-form-item label="AI 智能会议能力">
+          <div class="ai-schedule-grid">
+            <div class="ai-schedule-item" :class="{ active: formState.enableLiveDecision }">
+              <div class="item-info">
+                <div class="item-title">
+                  <ApartmentOutlined style="color: #1677ff;" />
+                  <span>会中决策追踪</span>
+                  <a-tag color="orange" size="small">推荐开启</a-tag>
+                </div>
+                <p class="item-desc">自动提炼研讨共识与决策点、构建动态思维导图</p>
+              </div>
+              <a-switch
+                v-model:checked="formState.enableLiveDecision"
+                checked-children="开启"
+                un-checked-children="关闭"
+              />
+            </div>
+
+            <div class="ai-schedule-item" :class="{ active: formState.enableTranscription }">
+              <div class="item-info">
+                <div class="item-title">
+                  <AudioOutlined style="color: #52c41a;" />
+                  <span>实时语音转写</span>
+                </div>
+                <p class="item-desc">基于 ASR 实时语音转文字及多发言人逐字记录</p>
+              </div>
+              <a-switch
+                v-model:checked="formState.enableTranscription"
+                checked-children="开启"
+                un-checked-children="关闭"
+              />
+            </div>
+          </div>
+        </a-form-item>
+
         <a-form-item style="margin-top: 24px">
           <a-button
             type="primary"
@@ -156,9 +191,10 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
-import { CalendarOutlined, HistoryOutlined } from '@ant-design/icons-vue'
+import { CalendarOutlined, HistoryOutlined, ApartmentOutlined, AudioOutlined } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { saveMeeting, updateMeetingTime, sendInviteEmail, generateInvite } from '@/api/meeting'
+import { toggleMeetingFeature } from '@/api/meetingAi'
 import { formatMeetingNo, copyText } from '@/utils/format'
 
 const router = useRouter()
@@ -174,7 +210,9 @@ const formState = reactive({
   meetingNoType: 1, // 预约默认随机10位
   jionPassword: '',
   inviteEmails: '',
-  remark: ''
+  remark: '',
+  enableLiveDecision: true,
+  enableTranscription: true
 })
 
 const rules = {
@@ -238,6 +276,22 @@ async function handleSchedule() {
       }
     }
 
+    // 初始化预约会议的 AI 决策与转写功能
+    if (formState.enableLiveDecision) {
+      try {
+        await toggleMeetingFeature({ meetingId, feature: 'live_decision', enabled: true })
+      } catch (e) {
+        console.warn('开启预约会议决策追踪提示:', e)
+      }
+    }
+    if (formState.enableTranscription) {
+      try {
+        await toggleMeetingFeature({ meetingId, feature: 'transcription', enabled: true })
+      } catch (e) {
+        console.warn('开启预约会议实时转写提示:', e)
+      }
+    }
+
     // 4. 获取邀请码与文案
     let inviteInfo = null
     try {
@@ -269,6 +323,8 @@ async function handleSchedule() {
 
 function enterScheduledMeeting() {
   if (scheduledResult.value?.meetingId) {
+    sessionStorage.setItem('initial_transcription_enabled', formState.enableTranscription ? '1' : '0')
+    sessionStorage.setItem('initial_live_decision_enabled', formState.enableLiveDecision ? '1' : '0')
     router.push(`/meeting/room/${scheduledResult.value.meetingId}`)
   }
 }
@@ -438,6 +494,53 @@ function resetForm() {
   align-items: center;
   justify-content: center;
   gap: 12px;
+}
+
+/* 预约会议 AI 特性卡片 */
+.ai-schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.ai-schedule-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.ai-schedule-item.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  padding-right: 12px;
+}
+
+.item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.item-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
 }
 </style>
 

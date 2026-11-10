@@ -77,7 +77,12 @@
         :class="{ active: isAiOpen }"
         @click="emit('toggleAi')"
       >
-        <RobotOutlined class="tool-icon" :style="{ color: isTranscribing ? '#52c41a' : undefined }" />
+        <a-badge :dot="isDecisionActive || isTranscribing" :offset="[4, 0]">
+          <RobotOutlined
+            class="tool-icon"
+            :style="{ color: isDecisionActive ? '#1677ff' : (isTranscribing ? '#52c41a' : undefined) }"
+          />
+        </a-badge>
         <span class="tool-label">AI 助手</span>
       </button>
     </div>
@@ -159,6 +164,10 @@ defineProps({
     default: false
   },
   isAiOpen: {
+    type: Boolean,
+    default: false
+  },
+  isDecisionActive: {
     type: Boolean,
     default: false
   },

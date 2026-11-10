@@ -270,6 +270,10 @@ export function useWebSocket() {
           emit('minutes_published', data.meesageContent || data)
           break
 
+        case 30: // DECISION_EVENT: 会中实时决策更新事件
+          emit('decision_event', data.meesageContent || data)
+          break
+
         default:
           break
       }

@@ -39,7 +39,7 @@ http.interceptors.response.use(
       }
 
       // 901: 登录已过期或未登录
-      if (res.code === 901) {
+      if (res.code === 901 || (res.info && (res.info.includes('未登录') || res.info.includes('请先登录') || res.info.includes('登录超时')))) {
         localStorage.removeItem('token')
         localStorage.removeItem('userInfo')
         message.warning(res.info || '登录凭据已过期，请重新登录')

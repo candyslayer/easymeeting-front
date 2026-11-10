@@ -70,6 +70,7 @@
       >
         <CheckCircleOutlined />
         <span>会议决策</span>
+        <span v-if="aiStore.decisions.length > 0" class="badge-dot"></span>
       </button>
 
       <button
@@ -345,6 +346,8 @@ const isSessionActive = ref(false)
 const startingSession = ref(false)
 const currentSessionId = ref('')
 const chunkIndex = ref(0)
+const hasAutoStarted = ref(false)
+const userManuallyStopped = ref(false)
 let mediaRecorder = null
 let audioContextInstance = null
 let mixerDestination = null
@@ -381,6 +384,89 @@ function disconnectAllMixerSources() {
   connectedSourceNodes.clear()
 }
 
+// 启动 MediaRecorder 录制并周期推送分片
+function startRecording(stream) {
+  if (!stream) return
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') return
+
+  try {
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm'
+
+    mediaRecorder = new MediaRecorder(stream, { mimeType })
+
+    mediaRecorder.ondataavailable = async (e) => {
+      if (e.data && e.data.size > 0 && isSessionActive.value) {
+        chunkIndex.value++
+        const currentIdx = chunkIndex.value
+        try {
+          const formData = new FormData()
+          formData.append('sessionId', currentSessionId.value)
+          formData.append('chunkIndex', currentIdx)
+          formData.append('audioData', e.data, `chunk_${currentIdx}.webm`)
+          formData.append('isLastChunk', false)
+
+          const seg = await streamAudioChunk(formData)
+          if (seg && seg.originalText) {
+            appendOrUpdateSegment(seg)
+          }
+        } catch (err) {
+          console.warn('分片推送转写异常', err)
+        }
+      }
+    }
+
+    // 每 3000ms 切分一个音频块
+    mediaRecorder.start(3000)
+  } catch (e) {
+    console.warn('初始化音频 MediaRecorder 失败，转写将依靠信令广播', e)
+  }
+}
+
+// 自动检测并启动实时转写会话（如弹窗勾选或后端会议配置已开启）
+async function autoStartTranscriptionIfNeeded() {
+  if (userManuallyStopped.value || hasAutoStarted.value || isSessionActive.value || startingSession.value) {
+    return
+  }
+
+  const isEnabledInStorage = sessionStorage.getItem('initial_transcription_enabled') === '1'
+  const isEnabledInStore = Boolean(aiStore.isTranscriptionEnabled)
+
+  if (!isEnabledInStorage && !isEnabledInStore) {
+    return
+  }
+
+  if (!props.meetingId) {
+    return
+  }
+
+  hasAutoStarted.value = true
+  console.log('💡 弹窗或会议配置中已开启实时转写，自动触发开启转写会话...')
+  await startRealtimeSession(true)
+}
+
+// 监听本地麦克风音频流的变化，动态接入混音器并适时触发自动开启转写
+watch(
+  () => props.localStream,
+  (newLocal) => {
+    if (newLocal) {
+      if (!isSessionActive.value && !hasAutoStarted.value && !userManuallyStopped.value) {
+        autoStartTranscriptionIfNeeded()
+      } else if (isSessionActive.value) {
+        if (audioContextInstance && mixerDestination) {
+          connectStreamToMixer(newLocal, audioContextInstance, mixerDestination)
+        } else if (!mediaRecorder) {
+          const audioTracks = newLocal.getAudioTracks()
+          if (audioTracks && audioTracks.length > 0) {
+            startRecording(new MediaStream([audioTracks[0]]))
+          }
+        }
+      }
+    }
+  }
+)
+
 // 监听房间远端成员音频流的变化，动态接入新参会者的发言
 watch(
   () => props.remoteStreams,
@@ -392,6 +478,39 @@ watch(
     }
   },
   { deep: true }
+)
+
+// 监听转写配置开关变化
+watch(
+  () => aiStore.isTranscriptionEnabled,
+  (enabled) => {
+    if (enabled && !isSessionActive.value && !hasAutoStarted.value && !userManuallyStopped.value) {
+      autoStartTranscriptionIfNeeded()
+    }
+  }
+)
+
+// 监听抽屉打开事件，确保就绪状态可自动转为开启中
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen && !isSessionActive.value && !hasAutoStarted.value && !userManuallyStopped.value) {
+      autoStartTranscriptionIfNeeded()
+    }
+  }
+)
+
+// 监听 meetingId 变化
+watch(
+  () => props.meetingId,
+  (newMeetingId) => {
+    if (newMeetingId) {
+      initDrawerData()
+      aiStore.fetchFeatureStatus(newMeetingId).then(() => {
+        autoStartTranscriptionIfNeeded()
+      })
+    }
+  }
 )
 
 // 问答
@@ -413,12 +532,13 @@ async function toggleRealtimeSession() {
   if (isSessionActive.value) {
     stopRealtimeSession()
   } else {
-    startRealtimeSession()
+    userManuallyStopped.value = false
+    startRealtimeSession(false)
   }
 }
 
-async function startRealtimeSession() {
-  if (!props.meetingId) return
+async function startRealtimeSession(isAuto = false) {
+  if (!props.meetingId || startingSession.value || isSessionActive.value) return
 
   startingSession.value = true
   try {
@@ -474,42 +594,14 @@ async function startRealtimeSession() {
 
     // 4. 启动 MediaRecorder 周期分片推送
     if (audioStream) {
-      try {
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm'
-
-        mediaRecorder = new MediaRecorder(audioStream, { mimeType })
-
-        mediaRecorder.ondataavailable = async (e) => {
-          if (e.data && e.data.size > 0 && isSessionActive.value) {
-            chunkIndex.value++
-            const currentIdx = chunkIndex.value
-            try {
-              const formData = new FormData()
-              formData.append('sessionId', currentSessionId.value)
-              formData.append('chunkIndex', currentIdx)
-              formData.append('audioData', e.data, `chunk_${currentIdx}.webm`)
-              formData.append('isLastChunk', false)
-
-              const seg = await streamAudioChunk(formData)
-              if (seg && seg.originalText) {
-                appendOrUpdateSegment(seg)
-              }
-            } catch (err) {
-              console.warn('分片推送转写异常', err)
-            }
-          }
-        }
-
-        // 每 3000ms 切分一个音频块
-        mediaRecorder.start(3000)
-      } catch (e) {
-        console.warn('初始化音频 MediaRecorder 失败，转写将依靠信令广播', e)
-      }
+      startRecording(audioStream)
     }
 
-    message.success('实时转写会话已建立')
+    if (isAuto) {
+      message.success('已自动开启全场实时语音转写')
+    } else {
+      message.success('实时转写会话已建立')
+    }
   } catch (err) {
     message.error(err.message || '开启实时转写失败')
     isSessionActive.value = false
@@ -528,6 +620,7 @@ async function startRealtimeSession() {
 
 async function stopRealtimeSession() {
   // 先将状态置为 false，避免 stop() 触发的最后一段碎片再并发发起网络请求
+  userManuallyStopped.value = true
   isSessionActive.value = false
 
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -634,17 +727,48 @@ async function initDrawerData() {
   } catch (e) {}
 }
 
-let unbindWs = null
+let unbindWsTranscript = null
+let unbindWsDecision = null
 
-onMounted(() => {
+onMounted(async () => {
   initDrawerData()
+  if (props.meetingId) {
+    try {
+      await aiStore.fetchFeatureStatus(props.meetingId)
+    } catch (e) {}
+  }
 
-  // 注册 WebSocket 增量转写消息监听 (messageType 20)
+  // 立即检查并尝试自动开启实时转写
+  autoStartTranscriptionIfNeeded()
+
+  // 延时 1.2 秒再次检查（针对本地设备流获取略微延迟的场景进行兜底启动）
+  setTimeout(() => {
+    if (!isSessionActive.value && !hasAutoStarted.value && !userManuallyStopped.value) {
+      autoStartTranscriptionIfNeeded()
+    }
+  }, 1200)
+
+  // 页面全局交互时恢复 AudioContext 状态，避免受浏览器音频自动播放策略挂起
+  const resumeAudioCtx = () => {
+    if (audioContextInstance && audioContextInstance.state === 'suspended') {
+      audioContextInstance.resume().catch(() => {})
+    }
+  }
+  window.addEventListener('click', resumeAudioCtx, { once: true })
+
+  // 注册 WebSocket 增量转写与实时决策监听
   if (typeof props.onWs === 'function') {
-    unbindWs = props.onWs(20, (data) => {
+    unbindWsTranscript = props.onWs(20, (data) => {
       const seg = data.meesageContent || data
       if (seg) {
         appendOrUpdateSegment(seg)
+      }
+    })
+
+    unbindWsDecision = props.onWs(30, (data) => {
+      const eventDto = data.meesageContent || data
+      if (eventDto) {
+        aiStore.handleDecisionEvent(eventDto)
       }
     })
   }
@@ -654,8 +778,11 @@ onUnmounted(() => {
   if (isSessionActive.value) {
     stopRealtimeSession()
   }
-  if (typeof unbindWs === 'function') {
-    unbindWs()
+  if (typeof unbindWsTranscript === 'function') {
+    unbindWsTranscript()
+  }
+  if (typeof unbindWsDecision === 'function') {
+    unbindWsDecision()
   }
 })
 </script>

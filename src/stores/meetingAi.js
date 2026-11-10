@@ -1,14 +1,21 @@
 import { defineStore } from 'pinia'
-import { message } from 'ant-design-vue'
+import { message, notification } from 'ant-design-vue'
 import {
   getRecordingList,
   getTranscriptSegments,
   getMeetingMinutes,
   getDecisionList,
+  getDecisionDetail,
   getActionItemList,
   getTaskStatus,
   getAgentLogs,
-  startAnalysis
+  startAnalysis,
+  toggleMeetingFeature,
+  getMeetingFeatureStatus,
+  confirmDecision,
+  rejectDecision,
+  deferDecision,
+  getDecisionEvents
 } from '@/api/meetingAi'
 
 export const useMeetingAiStore = defineStore('meetingAi', {
@@ -17,6 +24,14 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     currentMeetingId: '',
     meetingInfo: null,
     activeTab: 'overview', // 'overview' | 'transcript' | 'recording' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'qa' | 'agents'
+
+    // 会议级功能配置与统一 ASR 引擎状态
+    featureConfig: {
+      transcriptionEnabled: false,
+      liveDecisionEnabled: false,
+      asrRunning: false
+    },
+    featureLoading: false,
 
     // 录音文件管理
     recordings: [],
@@ -38,6 +53,9 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     // 决策与待办
     decisions: [],
     decisionsLoading: false,
+    activeDecisionId: null, // 当前脑图聚焦的决策 ID
+    decisionEvents: [], // 实时决策演进事件记录流
+    decisionEventsLoading: false,
     actionItems: [],
     actionItemsLoading: false,
 
@@ -52,6 +70,11 @@ export const useMeetingAiStore = defineStore('meetingAi', {
   }),
 
   getters: {
+    // 统一 ASR 引擎是否运行中
+    isAsrRunning: (state) => Boolean(state.featureConfig?.asrRunning),
+    isTranscriptionEnabled: (state) => Boolean(state.featureConfig?.transcriptionEnabled),
+    isLiveDecisionEnabled: (state) => Boolean(state.featureConfig?.liveDecisionEnabled),
+
     // 纪要状态枚举文本
     minutesStatusLabel: (state) => {
       const status = state.minutes?.status
@@ -86,14 +109,24 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       }
     },
 
-    // 候选待人工确认的决策
-    pendingDecisions: (state) => {
-      return state.decisions.filter((d) => d.status === 'PENDING')
+    // 决策分类
+    proposedDecisions: (state) => {
+      return state.decisions.filter((d) => d.status === 'PROPOSED' || d.status === 'PENDING')
     },
-
-    // 已经确认生效的决策
+    discussingDecisions: (state) => {
+      return state.decisions.filter((d) => d.status === 'DISCUSSING')
+    },
     confirmedDecisions: (state) => {
       return state.decisions.filter((d) => d.status === 'CONFIRMED')
+    },
+    deferredDecisions: (state) => {
+      return state.decisions.filter((d) => d.status === 'DEFERRED')
+    },
+    rejectedDecisions: (state) => {
+      return state.decisions.filter((d) => d.status === 'REJECTED')
+    },
+    pendingDecisions: (state) => {
+      return state.decisions.filter((d) => d.status === 'PENDING' || d.status === 'PROPOSED' || d.status === 'DISCUSSING')
     }
   },
 
@@ -193,6 +226,212 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     },
 
     /**
+     * 查询会议功能开关状态与统一 ASR 引擎状态
+     */
+    async fetchFeatureStatus(meetingId = this.currentMeetingId) {
+      if (!meetingId) return
+      this.featureLoading = true
+      try {
+        const config = await getMeetingFeatureStatus(meetingId)
+        if (config) {
+          this.featureConfig = {
+            transcriptionEnabled: Boolean(config.transcriptionEnabled),
+            liveDecisionEnabled: Boolean(config.liveDecisionEnabled),
+            asrRunning: Boolean(config.asrRunning)
+          }
+        }
+      } catch (err) {
+        console.warn('查询会议功能状态失败', err)
+      } finally {
+        this.featureLoading = false
+      }
+    },
+
+    /**
+     * 动态切换会议功能（实时转写 / 会中决策）
+     * 自动驱动后端 SessionManager 进行 ASR 生命周期管理
+     */
+    async toggleFeature(feature, enabled, meetingId = this.currentMeetingId) {
+      if (!meetingId) return
+      this.featureLoading = true
+      try {
+        const config = await toggleMeetingFeature({
+          meetingId,
+          feature,
+          enabled
+        })
+        if (config) {
+          this.featureConfig = {
+            transcriptionEnabled: Boolean(config.transcriptionEnabled),
+            liveDecisionEnabled: Boolean(config.liveDecisionEnabled),
+            asrRunning: Boolean(config.asrRunning)
+          }
+        }
+        const label = feature === 'transcription' ? '实时语音转写' : '会中决策识别'
+        message.success(`${label}已${enabled ? '开启' : '关闭'}`)
+      } catch (err) {
+        message.error(err.message || '切换功能开关失败')
+      } finally {
+        this.featureLoading = false
+      }
+    },
+
+    /**
+     * 处理 WebSocket / SSE 广播的决策演进事件 (messageType 30)
+     */
+    handleDecisionEvent(eventDto) {
+      if (!eventDto) return
+      console.log('⚡ 收到会中决策实时演进事件:', eventDto)
+
+      // 1. 记入本地演进流水
+      this.decisionEvents.unshift(eventDto)
+      if (this.decisionEvents.length > 50) {
+        this.decisionEvents.pop()
+      }
+
+      // 2. 局部增量或就地更新决策列表
+      const targetDecision = eventDto.currentDecision
+      if (targetDecision && targetDecision.decisionId) {
+        const existingIdx = this.decisions.findIndex(
+          (d) => String(d.decisionId) === String(targetDecision.decisionId)
+        )
+        if (existingIdx !== -1) {
+          // 合并更新
+          this.decisions[existingIdx] = {
+            ...this.decisions[existingIdx],
+            ...targetDecision
+          }
+        } else {
+          // 新增决策
+          this.decisions.unshift(targetDecision)
+        }
+
+        // 如果未聚焦任何决策，则聚焦最新演进的决策
+        if (!this.activeDecisionId) {
+          this.activeDecisionId = targetDecision.decisionId
+        }
+      } else if (eventDto.decisionId) {
+        // 如果未附带完整 currentDecision，通过 ID 就地更新状态或重新拉取
+        const existingIdx = this.decisions.findIndex(
+          (d) => String(d.decisionId) === String(eventDto.decisionId)
+        )
+        if (existingIdx !== -1) {
+          if (eventDto.currentStatus) {
+            this.decisions[existingIdx].status = eventDto.currentStatus
+          }
+          if (eventDto.topic) {
+            this.decisions[existingIdx].topic = eventDto.topic
+          }
+        } else {
+          this.loadDecisions()
+        }
+      }
+
+      // 3. 桌面/卡片提示通知
+      const eventType = eventDto.eventType
+      const topicName = eventDto.topic || targetDecision?.topic || '决策事项'
+      if (eventType === 'CREATED') {
+        notification.info({
+          message: '识别到新会议决策议题',
+          description: `主题: ${topicName} (状态: 候选待定)`,
+          duration: 3.5
+        })
+      } else if (eventType === 'CONFIRMED') {
+        notification.success({
+          message: '决策已达成一致并确认',
+          description: `「${topicName}」已正式生效`,
+          duration: 3.5
+        })
+      } else if (eventType === 'UPDATED') {
+        message.info(`会中决策更新: ${topicName}`)
+      }
+    },
+
+    /**
+     * 确认决策生效
+     */
+    async confirmDecisionAction(decisionId, remark = '') {
+      try {
+        const updated = await confirmDecision({ decisionId, remark })
+        if (updated) {
+          const idx = this.decisions.findIndex((d) => String(d.decisionId) === String(decisionId))
+          if (idx !== -1) {
+            this.decisions[idx] = { ...this.decisions[idx], ...updated }
+          }
+        }
+        message.success('决策已正式确认生效')
+        return updated
+      } catch (err) {
+        message.error(err.message || '确认决策失败')
+        throw err
+      }
+    },
+
+    /**
+     * 否决决策
+     */
+    async rejectDecisionAction(decisionId, remark = '') {
+      try {
+        const updated = await rejectDecision({ decisionId, remark })
+        if (updated) {
+          const idx = this.decisions.findIndex((d) => String(d.decisionId) === String(decisionId))
+          if (idx !== -1) {
+            this.decisions[idx] = { ...this.decisions[idx], ...updated }
+          }
+        }
+        message.info('决策已标记为否决/废弃')
+        return updated
+      } catch (err) {
+        message.error(err.message || '否决决策失败')
+        throw err
+      }
+    },
+
+    /**
+     * 暂缓决定
+     */
+    async deferDecisionAction(decisionId, remark = '') {
+      try {
+        const updated = await deferDecision({ decisionId, remark })
+        if (updated) {
+          const idx = this.decisions.findIndex((d) => String(d.decisionId) === String(decisionId))
+          if (idx !== -1) {
+            this.decisions[idx] = { ...this.decisions[idx], ...updated }
+          }
+        }
+        message.info('决策已转为暂缓决定')
+        return updated
+      } catch (err) {
+        message.error(err.message || '暂缓决策失败')
+        throw err
+      }
+    },
+
+    /**
+     * 查询决策演进事件历史
+     */
+    async loadDecisionEvents(decisionId = null, meetingId = this.currentMeetingId) {
+      if (!meetingId) return
+      this.decisionEventsLoading = true
+      try {
+        const list = await getDecisionEvents({ meetingId, decisionId })
+        this.decisionEvents = list || []
+        return this.decisionEvents
+      } catch (err) {
+        console.warn('获取决策演进记录失败', err)
+      } finally {
+        this.decisionEventsLoading = false
+      }
+    },
+
+    /**
+     * 设置当前聚焦脑图的决策 ID
+     */
+    setActiveDecision(decisionId) {
+      this.activeDecisionId = decisionId
+    },
+
+    /**
      * 刷新决策列表
      */
     async loadDecisions(meetingId = this.currentMeetingId) {
@@ -201,6 +440,9 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       try {
         const data = await getDecisionList(meetingId)
         this.decisions = data || []
+        if (this.decisions.length > 0 && !this.activeDecisionId) {
+          this.activeDecisionId = this.decisions[0].decisionId
+        }
       } catch (err) {
         console.error('获取决策列表失败', err)
       } finally {
@@ -315,6 +557,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       this.currentMeetingId = ''
       this.meetingInfo = null
       this.activeTab = 'overview'
+      this.featureConfig = {
+        transcriptionEnabled: false,
+        liveDecisionEnabled: false,
+        asrRunning: false
+      }
+      this.featureLoading = false
       this.recordings = []
       this.recordingsLoading = false
       this.transcriptSegments = []
@@ -327,6 +575,9 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       this.agendaTopics = []
       this.decisions = []
       this.decisionsLoading = false
+      this.activeDecisionId = null
+      this.decisionEvents = []
+      this.decisionEventsLoading = false
       this.actionItems = []
       this.actionItemsLoading = false
       this.currentTask = null

@@ -164,6 +164,8 @@
       :is-participants-open="participantsOpen"
       :is-chat-open="chatOpen"
       :is-ai-open="aiDrawerOpen"
+      :is-decision-active="aiStore.isLiveDecisionEnabled"
+      :is-transcribing="aiStore.isTranscriptionEnabled || aiStore.isAsrRunning"
       :is-host="meetingStore.isHost"
       @toggle-audio="handleToggleAudio"
       @toggle-video="handleToggleVideo"
@@ -244,6 +246,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMeetingStore } from '@/stores/meeting'
+import { useMeetingAiStore } from '@/stores/meetingAi'
 import { useMediaDevices } from '@/composables/useMediaDevices'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useWebRTC } from '@/composables/useWebRTC'
@@ -271,6 +274,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const meetingStore = useMeetingStore()
+const aiStore = useMeetingAiStore()
 
 const meetingId = computed(() => route.params.id)
 
@@ -479,9 +483,14 @@ async function initMeetingRoom() {
     loadingTip.value = '正在加入会议房间...'
     await jionMeeting(meetingId.value, isVideoActive.value)
 
-    // 步骤 6：加载房间内已有的成员列表和历史聊天记录
+    // 步骤 6：加载房间内已有的成员列表和历史聊天记录及 AI 特性状态
     await refreshMemberList()
     loadChatHistory()
+    aiStore.fetchFeatureStatus(meetingId.value).then(() => {
+      if (aiStore.isLiveDecisionEnabled) {
+        console.log('💡 本次会议已开启「会中决策实时追踪」')
+      }
+    }).catch(() => {})
 
     // 步骤 7：对房间内已有远端成员进行对等连接探测与双向保活
     syncPeersWithExistingMembers()
@@ -572,6 +581,7 @@ function syncPeersWithExistingMembers() {
 // 麦克风开关
 async function handleToggleAudio() {
   const nextState = toggleAudio()
+  sessionStorage.setItem('initial_audio_open', nextState ? '1' : '0')
   try {
     await updateMemberMediaState({
       meetingId: meetingId.value,
@@ -590,6 +600,7 @@ async function handleToggleAudio() {
 // 摄像头开关
 async function handleToggleVideo() {
   const nextState = toggleVideo()
+  sessionStorage.setItem('initial_video_open', nextState ? '1' : '0')
   try {
     await updateMemberMediaState({
       meetingId: meetingId.value,
@@ -696,7 +707,17 @@ function handleFinishMeeting() {
   })
 }
 
+// 页面刷新 / 关闭拦截防误触
+function handleBeforeUnload(e) {
+  e.preventDefault()
+  e.returnValue = '您正在进行会议，刷新页面将重新协商通话。确定要刷新吗？'
+  return e.returnValue
+}
+
 function leaveAndCleanUp() {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  sessionStorage.removeItem('initial_transcription_enabled')
+  sessionStorage.removeItem('initial_live_decision_enabled')
   stopAllTracks()
   closeAllPeers()
   disconnectWs()
@@ -715,11 +736,13 @@ async function handleCopyMeetingNo() {
 }
 
 onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
   initMeetingRoom()
   document.addEventListener('fullscreenchange', handleFullscreenChange)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
   stopAllTracks()
   closeAllPeers()

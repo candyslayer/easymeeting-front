@@ -202,9 +202,11 @@ async function handleJoinByNumber() {
       throw new Error('未获取到有效会议信息')
     }
 
-    // 记录初始偏好
+    // 记录初始偏好并清除历史遗留 AI 初始标记（使用会议真实后端配置）
     sessionStorage.setItem('initial_video_open', mediaOptions.openVideo ? '1' : '0')
     sessionStorage.setItem('initial_audio_open', mediaOptions.openAudio ? '1' : '0')
+    sessionStorage.removeItem('initial_transcription_enabled')
+    sessionStorage.removeItem('initial_live_decision_enabled')
 
     message.success('验证通过，正在进入会议室...')
     router.push(`/meeting/room/${current.meetingId}`)

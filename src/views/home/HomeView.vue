@@ -209,7 +209,7 @@
     <a-modal
       v-model:open="quickMeetingModalVisible"
       title="快速发起会议"
-      width="500px"
+      width="520px"
       :confirm-loading="creatingMeeting"
       @ok="handleCreateQuickMeeting"
     >
@@ -248,6 +248,60 @@
             maxlength="20"
           />
         </a-form-item>
+
+        <a-divider style="margin: 16px 0 14px" />
+
+        <!-- AI 智能能力预设 (会中决策 / 实时转写) -->
+        <div class="ai-feature-section">
+          <div class="ai-section-header">
+            <div class="ai-section-title">
+              <RobotOutlined style="color: #1677ff; font-size: 16px;" />
+              <span>AI 智能会议能力</span>
+            </div>
+            <a-tag color="blue">Spring AI 多 Agent 赋能</a-tag>
+          </div>
+
+          <!-- 1. 会中决策实时追踪卡片 -->
+          <div class="ai-feature-card" :class="{ active: quickForm.enableLiveDecision }">
+            <div class="card-left">
+              <div class="feature-title-row">
+                <ApartmentOutlined style="color: #1677ff;" />
+                <span class="feature-name">会中实时决策追踪</span>
+                <a-tag color="orange" size="small">推荐开启</a-tag>
+              </div>
+              <p class="feature-desc">
+                AI 实时监听研讨发言、提炼共识并生成决策思维导图与演进时间线
+              </p>
+            </div>
+            <div class="card-right">
+              <a-switch
+                v-model:checked="quickForm.enableLiveDecision"
+                checked-children="开启"
+                un-checked-children="关闭"
+              />
+            </div>
+          </div>
+
+          <!-- 2. 实时语音转写卡片 -->
+          <div class="ai-feature-card" :class="{ active: quickForm.enableTranscription }">
+            <div class="card-left">
+              <div class="feature-title-row">
+                <AudioOutlined style="color: #52c41a;" />
+                <span class="feature-name">实时语音转写展示</span>
+              </div>
+              <p class="feature-desc">
+                统一 ASR 引擎多发言人语音转文字展示与逐字文本对齐
+              </p>
+            </div>
+            <div class="card-right">
+              <a-switch
+                v-model:checked="quickForm.enableTranscription"
+                checked-children="开启"
+                un-checked-children="关闭"
+              />
+            </div>
+          </div>
+        </div>
       </a-form>
     </a-modal>
 
@@ -275,11 +329,15 @@ import {
   SettingOutlined,
   LockOutlined,
   ShareAltOutlined,
-  RightOutlined
+  RightOutlined,
+  RobotOutlined,
+  ApartmentOutlined,
+  AudioOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarUrl } from '@/api/auth'
 import { quickMeeting, loadTodayMeeting, loadMeetingHistory } from '@/api/meeting'
+import { toggleMeetingFeature } from '@/api/meetingAi'
 import { formatMeetingNo, formatDateTime } from '@/utils/format'
 import DeviceTestModal from '@/components/common/DeviceTestModal.vue'
 import InviteModal from '@/components/common/InviteModal.vue'
@@ -302,7 +360,9 @@ const quickForm = reactive({
   meetingName: `${authStore.nickName || '用户'} 发起的视频会议`,
   meetingNoType: 0, // 0: 个人ID, 1: 随机10位
   jionType: 0, // 0: 免密, 1: 密码
-  jionPassword: ''
+  jionPassword: '',
+  enableLiveDecision: true, // 默认开启会中决策追踪
+  enableTranscription: true // 默认开启实时语音转写
 })
 
 const historyColumns = [
@@ -358,6 +418,33 @@ async function handleCreateQuickMeeting() {
       jionPassword: quickForm.jionPassword.trim()
     })
 
+    // 根据弹窗选择，初始化 AI 会中决策与转写功能
+    sessionStorage.setItem('initial_transcription_enabled', quickForm.enableTranscription ? '1' : '0')
+    sessionStorage.setItem('initial_live_decision_enabled', quickForm.enableLiveDecision ? '1' : '0')
+
+    if (quickForm.enableLiveDecision) {
+      try {
+        await toggleMeetingFeature({
+          meetingId,
+          feature: 'live_decision',
+          enabled: true
+        })
+      } catch (e) {
+        console.warn('初始化会中决策失败:', e)
+      }
+    }
+    if (quickForm.enableTranscription) {
+      try {
+        await toggleMeetingFeature({
+          meetingId,
+          feature: 'transcription',
+          enabled: true
+        })
+      } catch (e) {
+        console.warn('初始化实时转写失败:', e)
+      }
+    }
+
     message.success('会议创建成功，正在进入会议室...')
     quickMeetingModalVisible.value = false
     router.push(`/meeting/room/${meetingId}`)
@@ -369,6 +456,8 @@ async function handleCreateQuickMeeting() {
 }
 
 function enterMeeting(meeting) {
+  sessionStorage.removeItem('initial_transcription_enabled')
+  sessionStorage.removeItem('initial_live_decision_enabled')
   router.push(`/meeting/room/${meeting.meetingId}`)
 }
 
@@ -728,6 +817,72 @@ onMounted(() => {
   .recent-table-box {
     padding: 0;
   }
+}
+
+/* 快速发起会议弹窗 - AI 功能卡片 */
+.ai-feature-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.ai-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-primary, #1f2329);
+  font-size: 14px;
+}
+
+.ai-feature-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.ai-feature-card.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.card-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  padding-right: 12px;
+}
+
+.feature-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feature-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.feature-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
 }
 </style>
 

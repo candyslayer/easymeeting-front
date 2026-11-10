@@ -6,6 +6,32 @@ import http from './http'
  */
 
 // ==========================================
+// 0. 会议级功能开关与 ASR 状态控制 (/feature)
+// ==========================================
+
+/**
+ * 动态开关会议功能 (实时转写 / 会中决策)
+ * @param {Object} params { meetingId, feature: 'transcription'|'live_decision', enabled: boolean }
+ */
+export function toggleMeetingFeature(params) {
+  return http.post('/meetingAi/feature/toggle', {
+    meetingId: params.meetingId,
+    feature: params.feature,
+    enabled: Boolean(params.enabled)
+  })
+}
+
+/**
+ * 获取当前会议功能开启配置及 ASR 运行状态
+ * @param {string} meetingId 会议ID
+ */
+export function getMeetingFeatureStatus(meetingId) {
+  return http.get('/meetingAi/feature/status', {
+    params: { meetingId }
+  })
+}
+
+// ==========================================
 // 1. 录音与文件管理接口 (/recording)
 // ==========================================
 
@@ -230,7 +256,17 @@ export function getDecisionList(meetingId) {
 }
 
 /**
- * 更新决策状态 (CONFIRMED, PENDING, REJECTED)
+ * 查询单个决策详情
+ * @param {string} decisionId 决策ID
+ */
+export function getDecisionDetail(decisionId) {
+  return http.get('/meetingAi/decision/detail', {
+    params: { decisionId }
+  })
+}
+
+/**
+ * 更新决策状态 (CONFIRMED, DISCUSSING, PROPOSED, DEFERRED, REJECTED)
  * @param {Object} params { decisionId, status }
  */
 export function updateDecision(params) {
@@ -238,6 +274,62 @@ export function updateDecision(params) {
     decisionId: params.decisionId,
     status: params.status
   })
+}
+
+/**
+ * 人工确认决策生效
+ * @param {Object} params { decisionId, remark }
+ */
+export function confirmDecision(params) {
+  return http.post('/meetingAi/decision/confirm', {
+    decisionId: params.decisionId,
+    remark: params.remark || ''
+  })
+}
+
+/**
+ * 人工否决决策
+ * @param {Object} params { decisionId, remark }
+ */
+export function rejectDecision(params) {
+  return http.post('/meetingAi/decision/reject', {
+    decisionId: params.decisionId,
+    remark: params.remark || ''
+  })
+}
+
+/**
+ * 人工暂缓决定
+ * @param {Object} params { decisionId, remark }
+ */
+export function deferDecision(params) {
+  return http.post('/meetingAi/decision/defer', {
+    decisionId: params.decisionId,
+    remark: params.remark || ''
+  })
+}
+
+/**
+ * 查询决策演进事件历史
+ * @param {Object} params { meetingId, decisionId }
+ */
+export function getDecisionEvents(params) {
+  return http.get('/meetingAi/decision/events', {
+    params: {
+      meetingId: params.meetingId,
+      decisionId: params.decisionId || undefined
+    }
+  })
+}
+
+/**
+ * 获取决策事件 SSE 流连接 URL
+ * @param {string} meetingId 会议ID
+ */
+export function getDecisionEventsSseUrl(meetingId) {
+  const base = import.meta.env.VITE_API_BASE_URL || '/api'
+  const token = localStorage.getItem('token') || ''
+  return `${base}/meetingAi/decision/events/sse?meetingId=${encodeURIComponent(meetingId)}&token=${encodeURIComponent(token)}`
 }
 
 /**
