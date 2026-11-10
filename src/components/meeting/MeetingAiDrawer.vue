@@ -729,8 +729,12 @@ async function initDrawerData() {
 
 let unbindWsTranscript = null
 let unbindWsDecision = null
+let unbindWsMinutes = null
 
 onMounted(async () => {
+  if (props.meetingId) {
+    aiStore.initMeeting(props.meetingId)
+  }
   initDrawerData()
   if (props.meetingId) {
     try {
@@ -756,7 +760,7 @@ onMounted(async () => {
   }
   window.addEventListener('click', resumeAudioCtx, { once: true })
 
-  // 注册 WebSocket 增量转写与实时决策监听
+  // 注册 WebSocket 增量转写、实时决策与纪要生成全员广播监听
   if (typeof props.onWs === 'function') {
     unbindWsTranscript = props.onWs(20, (data) => {
       const seg = data.meesageContent || data
@@ -771,6 +775,18 @@ onMounted(async () => {
         aiStore.handleDecisionEvent(eventDto)
       }
     })
+
+    unbindWsMinutes = props.onWs(22, async (data) => {
+      console.log('💡 收到会议纪要与多 Agent 流水线分析完成广播 (type 22):', data)
+      const targetId = props.meetingId || data?.meetingId || data?.meesageContent?.meetingId
+      if (targetId) {
+        await Promise.allSettled([
+          aiStore.loadMinutes(targetId),
+          aiStore.loadDecisions(targetId),
+          aiStore.loadActionItems(targetId)
+        ])
+      }
+    })
   }
 })
 
@@ -783,6 +799,9 @@ onUnmounted(() => {
   }
   if (typeof unbindWsDecision === 'function') {
     unbindWsDecision()
+  }
+  if (typeof unbindWsMinutes === 'function') {
+    unbindWsMinutes()
   }
 })
 </script>

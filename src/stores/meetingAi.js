@@ -135,6 +135,7 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 设置当前会议并重置对应状态
      */
     initMeeting(meetingId, meetingInfo = null) {
+      if (!meetingId) return
       if (this.currentMeetingId !== meetingId) {
         this.resetState()
         this.currentMeetingId = meetingId
@@ -159,10 +160,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 刷新录音列表
      */
     async loadRecordings(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.recordingsLoading = true
       try {
-        const res = await getRecordingList(meetingId)
+        const res = await getRecordingList(mid)
         this.recordings = res || []
       } catch (err) {
         console.error('获取录音列表失败', err)
@@ -175,11 +178,13 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 刷新转写片段
      */
     async loadTranscriptSegments(meetingId = this.currentMeetingId, pageNo = 1, pageSize = 50) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.transcriptLoading = true
       try {
         const res = await getTranscriptSegments({
-          meetingId,
+          meetingId: mid,
           pageNo,
           pageSize
         })
@@ -200,10 +205,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 刷新会议纪要及议题
      */
     async loadMinutes(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.minutesLoading = true
       try {
-        const data = await getMeetingMinutes(meetingId)
+        const data = await getMeetingMinutes(mid)
         this.minutes = data
         if (data && data.agendaTopics) {
           try {
@@ -215,6 +222,14 @@ export const useMeetingAiStore = defineStore('meetingAi', {
           }
         } else {
           this.agendaTopics = []
+        }
+
+        // 若当前接口返回了内嵌的决策与待办，第一时间同步
+        if (data && Array.isArray(data.decisions) && data.decisions.length > 0) {
+          this.decisions = data.decisions
+        }
+        if (data && Array.isArray(data.actionItems) && data.actionItems.length > 0) {
+          this.actionItems = data.actionItems
         }
       } catch (err) {
         console.error('获取会议纪要失败', err)
@@ -229,10 +244,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 查询会议功能开关状态与统一 ASR 引擎状态
      */
     async fetchFeatureStatus(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.featureLoading = true
       try {
-        const config = await getMeetingFeatureStatus(meetingId)
+        const config = await getMeetingFeatureStatus(mid)
         if (config) {
           this.featureConfig = {
             transcriptionEnabled: Boolean(config.transcriptionEnabled),
@@ -435,10 +452,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 刷新决策列表
      */
     async loadDecisions(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.decisionsLoading = true
       try {
-        const data = await getDecisionList(meetingId)
+        const data = await getDecisionList(mid)
         this.decisions = data || []
         if (this.decisions.length > 0 && !this.activeDecisionId) {
           this.activeDecisionId = this.decisions[0].decisionId
@@ -454,10 +473,12 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 刷新待办列表
      */
     async loadActionItems(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       this.actionItemsLoading = true
       try {
-        const data = await getActionItemList({ meetingId })
+        const data = await getActionItemList({ meetingId: mid })
         this.actionItems = data || []
       } catch (err) {
         console.error('获取待办列表失败', err)
@@ -470,13 +491,15 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 一键刷新全部当前会议 AI 业务数据
      */
     async refreshAll(meetingId = this.currentMeetingId) {
-      if (!meetingId) return
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
       await Promise.allSettled([
-        this.loadRecordings(meetingId),
-        this.loadTranscriptSegments(meetingId, 1, this.transcriptPageSize),
-        this.loadMinutes(meetingId),
-        this.loadDecisions(meetingId),
-        this.loadActionItems(meetingId)
+        this.loadRecordings(mid),
+        this.loadTranscriptSegments(mid, 1, this.transcriptPageSize),
+        this.loadMinutes(mid),
+        this.loadDecisions(mid),
+        this.loadActionItems(mid)
       ])
     },
 
@@ -484,18 +507,20 @@ export const useMeetingAiStore = defineStore('meetingAi', {
      * 触发全量多 Agent 分析流水线并开启状态轮询
      */
     async triggerAnalysis(meetingId = this.currentMeetingId, forceReanalyze = false) {
-      if (!meetingId) return
+      const targetMeetingId = meetingId || this.currentMeetingId
+      if (!targetMeetingId) return
+      this.currentMeetingId = targetMeetingId
       this.isAnalyzing = true
       try {
         const task = await startAnalysis({
-          meetingId,
+          meetingId: targetMeetingId,
           targetLanguage: 'zh',
           forceReanalyze
         })
         this.currentTask = task
         message.success('已启动多 Agent 分析流水线')
         if (task && task.taskId) {
-          this.startTaskPolling(task.taskId)
+          this.startTaskPolling(task.taskId, targetMeetingId)
         }
       } catch (err) {
         message.error(err.message || '启动 AI 分析流水线失败')
@@ -504,14 +529,24 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     },
 
     /**
-     * 开启任务轮询 (每 2.5 秒)
+     * 开启任务轮询 (1.2 秒高响应轮询)
      */
-    startTaskPolling(taskId) {
+    startTaskPolling(taskId, meetingId = this.currentMeetingId) {
       this.stopTaskPolling()
+      const targetMeetingId = meetingId || this.currentMeetingId
+      if (targetMeetingId) {
+        this.currentMeetingId = targetMeetingId
+      }
+
       const poll = async () => {
         try {
           const task = await getTaskStatus(taskId)
           this.currentTask = task
+          const effectiveMeetingId = targetMeetingId || task?.meetingId || this.currentMeetingId
+          if (effectiveMeetingId && !this.currentMeetingId) {
+            this.currentMeetingId = effectiveMeetingId
+          }
+
           if (task && task.taskId) {
             const logs = await getAgentLogs(task.taskId)
             this.agentLogs = logs || []
@@ -521,11 +556,15 @@ export const useMeetingAiStore = defineStore('meetingAi', {
             this.isAnalyzing = false
             this.stopTaskPolling()
             if (task.taskStatus === 'SUCCESS') {
-              message.success('多 Agent 会议分析完成')
-              // 自动刷新纪要、议题、决策和待办
-              this.loadMinutes()
-              this.loadDecisions()
-              this.loadActionItems()
+              message.success('多 Agent 会议分析完成，已同步生成纪要与议题')
+              // 得到数据的瞬间，立刻拉取并在页面同步显示
+              if (effectiveMeetingId) {
+                await Promise.allSettled([
+                  this.loadMinutes(effectiveMeetingId),
+                  this.loadDecisions(effectiveMeetingId),
+                  this.loadActionItems(effectiveMeetingId)
+                ])
+              }
             } else if (task.taskStatus === 'FAILED') {
               message.error(`AI 分析流水线执行失败: ${task.errorMessage || '未知错误'}`)
             }
@@ -536,7 +575,7 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       }
 
       poll()
-      this.taskPollingTimer = setInterval(poll, 2500)
+      this.taskPollingTimer = setInterval(poll, 1200)
     },
 
     /**

@@ -486,6 +486,7 @@ async function initMeetingRoom() {
     // 步骤 6：加载房间内已有的成员列表和历史聊天记录及 AI 特性状态
     await refreshMemberList()
     loadChatHistory()
+    aiStore.initMeeting(meetingId.value)
     aiStore.fetchFeatureStatus(meetingId.value).then(() => {
       if (aiStore.isLiveDecisionEnabled) {
         console.log('💡 本次会议已开启「会中决策实时追踪」')
@@ -561,6 +562,17 @@ function setupWebSocketListeners() {
   onWs(6, () => {
     if (!chatOpen.value) {
       unreadChatCount.value++
+    }
+  })
+
+  // 5. MINUTES_PUBLISHED (messageType=22): AI 纪要/多 Agent 流水线完成全员广播
+  onWs(22, (data) => {
+    console.log('💡 收到会议纪要与 AI 分析全员广播:', data)
+    const mid = meetingId.value || data?.meetingId
+    if (mid) {
+      aiStore.loadMinutes(mid)
+      aiStore.loadDecisions(mid)
+      aiStore.loadActionItems(mid)
     }
   })
 }
