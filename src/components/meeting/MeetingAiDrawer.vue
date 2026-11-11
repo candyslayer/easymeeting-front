@@ -125,16 +125,53 @@
             <a-empty description="暂无实时转写内容。点击上方「开启转写」或等待其他发言人语音转写流。" />
           </div>
 
-          <div
-            v-for="(seg, idx) in realtimeSegments"
-            :key="seg.segmentId || idx"
-            class="live-seg-card"
-          >
-            <div class="live-seg-head">
-              <span class="speaker font-bold">{{ seg.speakerName || '参会发言人' }}</span>
-              <span class="time mono">{{ formatMs(seg.startTimeMs) }}</span>
+          <div v-else class="live-timeline">
+            <div
+              v-for="(seg, idx) in realtimeSegments"
+              :key="seg.segmentId || idx"
+              class="live-timeline-item"
+              :class="{
+                'is-first': idx === 0,
+                'is-last': idx === realtimeSegments.length - 1,
+                'is-focused': focusedLiveKey === getLiveSegKey(seg, idx)
+              }"
+              :style="getLiveItemVars(seg)"
+              @click="handleLiveTap(seg, idx)"
+            >
+              <!-- 左侧时间轴竖线与圆点 -->
+              <div class="live-axis" aria-hidden="true">
+                <span class="live-axis-top"></span>
+                <span class="live-axis-dot"></span>
+                <span class="live-axis-bottom"></span>
+              </div>
+
+              <!-- 用户头像 -->
+              <div class="live-avatar-col">
+                <a-avatar
+                  :size="30"
+                  :src="getLiveAvatarSrc(seg)"
+                  :load-error="() => handleLiveAvatarError(seg)"
+                  class="live-avatar"
+                  :style="{ background: getSpeakerTheme(seg.speakerName || '参会发言人').gradient }"
+                >
+                  {{ getSpeakerInitial(seg.speakerName || '参会发言人') }}
+                </a-avatar>
+              </div>
+
+              <!-- 气泡对话框 -->
+              <div class="live-speech-bubble">
+                <div class="live-bubble-inner">
+                  <div class="live-seg-head">
+                    <span class="speaker">
+                      <span class="speaker-dot"></span>
+                      <span class="font-bold">{{ seg.speakerName || '参会发言人' }}</span>
+                    </span>
+                    <span class="time-pill mono">{{ formatTranscriptMs(seg.startTimeMs) }}</span>
+                  </div>
+                  <p class="live-seg-text">{{ seg.currentText || seg.text || seg.originalText }}</p>
+                </div>
+              </div>
             </div>
-            <p class="live-seg-text">{{ seg.currentText || seg.text || seg.originalText }}</p>
           </div>
         </div>
       </div>
@@ -250,7 +287,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import {
@@ -282,6 +319,13 @@ import {
   getTranscriptSegments
 } from '@/api/meetingAi'
 import { useMeetingAiStore } from '@/stores/meetingAi'
+import { useMeetingStore } from '@/stores/meeting'
+import {
+  getSpeakerTheme,
+  getSpeakerInitial,
+  formatTranscriptMs,
+  resolveSpeakerAvatarUrl
+} from '@/utils/transcript'
 
 const props = defineProps({
   open: {
@@ -314,13 +358,59 @@ const emit = defineEmits(['update:open'])
 
 const router = useRouter()
 const aiStore = useMeetingAiStore()
+const meetingStore = useMeetingStore()
+
+const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)
+function onDrawerWindowResize() {
+  windowWidth.value = window.innerWidth
+}
 
 const drawerWidth = computed(() => {
-  if (typeof window !== 'undefined' && window.innerWidth < 640) {
+  if (windowWidth.value < 640) {
     return '100%'
   }
   return 480
 })
+
+const avatarVersion = Date.now()
+const failedLiveAvatarUrls = reactive(new Set())
+const focusedLiveKey = ref(null)
+
+function getLiveSegKey(seg, idx) {
+  return seg?.segmentId || `idx-${idx}`
+}
+
+function getLiveItemVars(seg) {
+  const theme = getSpeakerTheme(seg?.speakerName || '参会发言人')
+  return {
+    '--speaker-color': theme.color,
+    '--speaker-tint-border': theme.tintBorder,
+    '--speaker-glow': theme.glow
+  }
+}
+
+function getLiveAvatarSrc(seg) {
+  const url = resolveSpeakerAvatarUrl(seg, meetingStore.memberList, avatarVersion)
+  if (!url || failedLiveAvatarUrls.has(url)) return undefined
+  return url
+}
+
+function handleLiveAvatarError(seg) {
+  const url = resolveSpeakerAvatarUrl(seg, meetingStore.memberList, avatarVersion)
+  if (url) failedLiveAvatarUrls.add(url)
+  return true
+}
+
+function handleLiveTap(seg, idx) {
+  if (typeof window !== 'undefined') {
+    const selectedText = window.getSelection?.()?.toString()
+    if (selectedText) return
+  }
+  if (windowWidth.value <= 768 || (typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches)) {
+    const key = getLiveSegKey(seg, idx)
+    focusedLiveKey.value = focusedLiveKey.value === key ? null : key
+  }
+}
 
 const activeTab = ref('realtime') // 'realtime' | 'agents' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'qa'
 const workspaceModalOpen = ref(false)
@@ -518,14 +608,6 @@ const qaList = ref([])
 const qaInputText = ref('')
 const asking = ref(false)
 const qaBoxRef = ref(null)
-
-function formatMs(ms) {
-  if (!ms && ms !== 0) return '00:00'
-  const sec = Math.floor(ms / 1000)
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
 
 // 开启 / 停止实时转写
 async function toggleRealtimeSession() {
@@ -732,6 +814,9 @@ let unbindWsDecision = null
 let unbindWsMinutes = null
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', onDrawerWindowResize)
+  }
   if (props.meetingId) {
     aiStore.initMeeting(props.meetingId)
   }
@@ -791,6 +876,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', onDrawerWindowResize)
+  }
   if (isSessionActive.value) {
     stopRealtimeSession()
   }
@@ -932,11 +1020,9 @@ onUnmounted(() => {
 .realtime-segments-list {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: #fafafa;
+  overflow-x: hidden;
+  padding: 14px 18px 18px 12px;
+  background: linear-gradient(180deg, #f8fafd 0%, #f3f6fb 100%);
 }
 
 .realtime-empty {
@@ -944,36 +1030,216 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.live-seg-card {
-  background: #ffffff;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  padding: 10px 12px;
+.live-timeline {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+}
+
+.live-timeline-item {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  padding-bottom: 12px;
+  transition: opacity 0.22s ease;
+  z-index: 1;
+}
+
+.live-timeline-item.is-last {
+  padding-bottom: 4px;
+}
+
+.live-timeline-item.is-focused {
+  z-index: 10;
+}
+
+.live-axis {
+  width: 16px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.live-axis-top,
+.live-axis-bottom {
+  width: 2px;
+  background: #dce3ee;
+}
+
+.live-axis-top {
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.live-axis-bottom {
+  flex: 1;
+  min-height: 12px;
+}
+
+.live-timeline-item.is-first .live-axis-top,
+.live-timeline-item.is-last .live-axis-bottom {
+  opacity: 0;
+}
+
+.live-axis-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2.5px solid var(--speaker-color, #1677ff);
+  flex-shrink: 0;
+  transition:
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background-color 0.22s ease,
+    box-shadow 0.28s ease;
+}
+
+.live-avatar-col {
+  flex-shrink: 0;
+  padding-top: 1px;
+  margin-right: 9px;
+}
+
+.live-avatar {
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1), 0 0 0 1.5px #ffffff;
+  transition:
+    transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.28s ease;
+}
+
+.live-speech-bubble {
+  --bubble-bg: #ffffff;
+  --bubble-border: #e5ebf3;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: var(--bubble-bg);
+  border: 1px solid var(--bubble-border);
+  border-radius: 5px 12px 12px 12px;
+  padding: 9px 12px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  transform: translate3d(0, 0, 0) scale(1);
+  transform-origin: left center;
+  transition:
+    transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.28s ease,
+    border-color 0.22s ease;
+}
+
+.live-speech-bubble::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  background: var(--bubble-bg);
+  border-left: 1px solid var(--bubble-border);
+  border-bottom: 1px solid var(--bubble-border);
+  border-bottom-left-radius: 2px;
+  transform: rotate(45deg);
+  transition: border-color 0.22s ease;
+  z-index: 1;
+}
+
+.live-bubble-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .live-seg-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
 }
 
 .speaker {
-  color: #1677ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-main, #1f2329);
 }
 
-.time {
-  color: var(--text-tertiary);
+.speaker-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--speaker-color, #1677ff);
+}
+
+.time-pill {
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1677ff;
+  background: #f0f7ff;
+  border: 1px solid #d6e8ff;
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 
 .live-seg-text {
   font-size: 13px;
-  color: var(--text-main);
-  line-height: 1.5;
+  color: var(--text-main, #1f2329);
+  line-height: 1.55;
   margin: 0;
+  word-break: break-word;
+}
+
+@media (hover: hover) {
+  .live-timeline:hover .live-timeline-item:not(:hover):not(.is-focused) {
+    opacity: 0.84;
+  }
+
+  .live-timeline-item:hover {
+    z-index: 12;
+    opacity: 1;
+  }
+
+  .live-timeline-item:hover .live-axis-dot {
+    background: var(--speaker-color, #1677ff);
+    border-color: #ffffff;
+    transform: scale(1.42);
+    box-shadow: 0 0 0 4px var(--speaker-glow, rgba(22, 119, 255, 0.22));
+  }
+
+  .live-timeline-item:hover .live-avatar {
+    transform: translateY(-2px) scale(1.1);
+    box-shadow:
+      0 6px 14px var(--speaker-glow, rgba(22, 119, 255, 0.22)),
+      0 0 0 2px #ffffff,
+      0 0 0 3.5px var(--speaker-tint-border, #91caff);
+  }
+
+  .live-timeline-item:hover .live-speech-bubble {
+    --bubble-border: var(--speaker-tint-border, #69b1ff);
+    transform: translate3d(4px, -3px, 0) scale(1.015);
+    box-shadow:
+      0 12px 24px -8px rgba(15, 23, 42, 0.14),
+      0 6px 12px -4px var(--speaker-glow, rgba(22, 119, 255, 0.22));
+  }
+}
+
+.live-timeline-item.is-focused .live-axis-dot {
+  background: var(--speaker-color, #1677ff);
+  border-color: #ffffff;
+  transform: scale(1.36);
+  box-shadow: 0 0 0 4px var(--speaker-glow, rgba(22, 119, 255, 0.22));
+}
+
+.live-timeline-item.is-focused .live-speech-bubble {
+  --bubble-border: var(--speaker-tint-border, #69b1ff);
+  transform: translate3d(3px, -2px, 0) scale(1.012);
+  box-shadow:
+    0 10px 20px -6px rgba(15, 23, 42, 0.14),
+    0 4px 10px -4px var(--speaker-glow, rgba(22, 119, 255, 0.22));
 }
 
 .minutes-toolbar {
@@ -1137,10 +1403,13 @@ onUnmounted(() => {
     padding: 8px 12px;
   }
   .realtime-segments-list {
-    padding: 10px 12px;
+    padding: 12px 14px 16px 8px;
   }
-  .live-seg-card {
+  .live-speech-bubble {
     padding: 8px 10px;
+  }
+  .live-timeline-item:active .live-speech-bubble {
+    transform: translate3d(2px, -2px, 0) scale(1.008);
   }
   .minutes-preview-content {
     padding: 12px;
