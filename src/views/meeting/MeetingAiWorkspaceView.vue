@@ -228,12 +228,17 @@
           <ActionItemsPanel :meeting-id="meetingId" />
         </div>
 
-        <!-- 8. 智能问答 -->
+        <!-- 8. 行业术语智能理解 -->
+        <div v-show="currentTab === 'terminology'" class="tab-container">
+          <TerminologyPanel :meeting-id="meetingId" />
+        </div>
+
+        <!-- 9. 智能问答 -->
         <div v-show="currentTab === 'qa'" class="tab-container">
           <MeetingQaPanel :meeting-id="meetingId" />
         </div>
 
-        <!-- 9. Agent 执行状态 -->
+        <!-- 10. Agent 执行状态 -->
         <div v-show="currentTab === 'agents'" class="tab-container">
           <AgentExecutionPanel :meeting-id="meetingId" />
         </div>
@@ -260,7 +265,8 @@ import {
   QuestionCircleOutlined,
   ClusterOutlined,
   RightOutlined,
-  VideoCameraOutlined
+  VideoCameraOutlined,
+  BookOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMeetingAiStore } from '@/stores/meetingAi'
@@ -274,6 +280,7 @@ import MinutesPanel from '@/components/meeting-ai/MinutesPanel.vue'
 import TopicsPanel from '@/components/meeting-ai/TopicsPanel.vue'
 import DecisionsPanel from '@/components/meeting-ai/DecisionsPanel.vue'
 import ActionItemsPanel from '@/components/meeting-ai/ActionItemsPanel.vue'
+import TerminologyPanel from '@/components/meeting-ai/TerminologyPanel.vue'
 import MeetingQaPanel from '@/components/meeting-ai/MeetingQaPanel.vue'
 import AgentExecutionPanel from '@/components/meeting-ai/AgentExecutionPanel.vue'
 
@@ -302,6 +309,7 @@ const navTabs = computed(() => [
   { key: 'topics', label: '核心议题', icon: OrderedListOutlined, badge: aiStore.agendaTopics.length },
   { key: 'decisions', label: '会议决策', icon: CheckCircleOutlined, badge: aiStore.decisions.length },
   { key: 'actionItems', label: '待办事项', icon: UnorderedListOutlined, badge: aiStore.actionItems.length },
+  { key: 'terminology', label: '行业术语', icon: BookOutlined, badge: aiStore.meetingTerms.length },
   { key: 'qa', label: '智能问答', icon: QuestionCircleOutlined },
   { key: 'agents', label: 'Agent 审计', icon: ClusterOutlined }
 ])

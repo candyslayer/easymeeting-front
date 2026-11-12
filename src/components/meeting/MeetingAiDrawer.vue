@@ -84,6 +84,20 @@
 
       <button
         class="d-tab-btn"
+        :class="{ active: activeTab === 'terminology' }"
+        @click="activeTab = 'terminology'"
+      >
+        <BookOutlined />
+        <span>行业术语</span>
+        <span
+          v-if="aiStore.meetingTerms.length > 0"
+          class="badge-dot"
+          :class="{ pulse: aiStore.terminologyAnalyzing }"
+        ></span>
+      </button>
+
+      <button
+        class="d-tab-btn"
         :class="{ active: activeTab === 'qa' }"
         @click="activeTab = 'qa'"
       >
@@ -233,6 +247,58 @@
         <ActionItemsPanel :meeting-id="meetingId" />
       </div>
 
+      <!-- 6.5 会中行业术语智能理解 -->
+      <div v-show="activeTab === 'terminology'" class="tab-panel term-drawer-panel">
+        <div class="term-drawer-toolbar">
+          <div class="term-drawer-left">
+            <a-switch
+              size="small"
+              :checked="aiStore.isTermIntelligenceEnabled"
+              @change="handleToggleDrawerTermFeature"
+            />
+            <span class="term-switch-label">实时识别</span>
+            <a-tag v-if="aiStore.featureConfig.domainHint" color="geekblue" class="term-domain-tag">
+              {{ aiStore.featureConfig.domainHint }}
+            </a-tag>
+            <a-tag v-if="aiStore.conflictDualTermsCount > 0" color="purple" class="term-domain-tag">
+              冲突 {{ aiStore.conflictDualTermsCount }}
+            </a-tag>
+          </div>
+          <div class="term-drawer-actions">
+            <a-button
+              size="small"
+              type="primary"
+              ghost
+              :loading="aiStore.terminologyAnalyzing"
+              @click="handleDrawerAnalyzeTerms"
+            >
+              <template #icon><SyncOutlined :spin="aiStore.terminologyAnalyzing" /></template>
+              识别
+            </a-button>
+            <a-button size="small" @click="openWorkspaceModal">
+              <FullscreenOutlined /> 详情
+            </a-button>
+          </div>
+        </div>
+
+        <div class="term-drawer-list">
+          <a-spin :spinning="aiStore.meetingTermsLoading">
+            <a-empty
+              v-if="aiStore.meetingTerms.length === 0"
+              description="暂未识别到专业术语。开启实时识别或点击「识别」对当前转写进行解析。"
+              style="margin-top: 32px"
+            />
+            <TerminologyCard
+              v-for="item in aiStore.meetingTerms"
+              :key="item.occurrenceId || item.explanationId || item.surface"
+              :term="item"
+              compact
+              @jump-evidence="handleJumpTermEvidence"
+            />
+          </a-spin>
+        </div>
+      </div>
+
       <!-- 7. 抽屉内智能问答面板 -->
       <div v-show="activeTab === 'qa'" class="tab-panel qa-drawer-panel">
         <div class="qa-messages-box" ref="qaBoxRef">
@@ -304,19 +370,22 @@ import {
   ClusterOutlined,
   OrderedListOutlined,
   CheckCircleOutlined,
-  UnorderedListOutlined
+  UnorderedListOutlined,
+  BookOutlined
 } from '@ant-design/icons-vue'
 import MeetingAiWorkspaceModal from '@/components/meeting-ai/MeetingAiWorkspaceModal.vue'
 import AgentExecutionPanel from '@/components/meeting-ai/AgentExecutionPanel.vue'
 import TopicsPanel from '@/components/meeting-ai/TopicsPanel.vue'
 import DecisionsPanel from '@/components/meeting-ai/DecisionsPanel.vue'
 import ActionItemsPanel from '@/components/meeting-ai/ActionItemsPanel.vue'
+import TerminologyCard from '@/components/meeting-ai/TerminologyCard.vue'
 import {
   createRealtimeSession,
   streamAudioChunk,
   closeRealtimeSession,
   askMeetingQa,
-  getTranscriptSegments
+  getTranscriptSegments,
+  getTermEventsSseUrl
 } from '@/api/meetingAi'
 import { useMeetingAiStore } from '@/stores/meetingAi'
 import { useMeetingStore } from '@/stores/meeting'
@@ -412,7 +481,7 @@ function handleLiveTap(seg, idx) {
   }
 }
 
-const activeTab = ref('realtime') // 'realtime' | 'agents' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'qa'
+const activeTab = ref('realtime') // 'realtime' | 'agents' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'terminology' | 'qa'
 const workspaceModalOpen = ref(false)
 
 function openWorkspaceModal() {
@@ -596,9 +665,12 @@ watch(
   (newMeetingId) => {
     if (newMeetingId) {
       initDrawerData()
+      connectTermSse(newMeetingId)
       aiStore.fetchFeatureStatus(newMeetingId).then(() => {
         autoStartTranscriptionIfNeeded()
       })
+    } else {
+      disconnectTermSse()
     }
   }
 )
@@ -797,6 +869,7 @@ function handleTriggerAnalysis() {
 async function initDrawerData() {
   if (!props.meetingId) return
   aiStore.loadMinutes(props.meetingId)
+  aiStore.loadMeetingTerms(props.meetingId)
   try {
     const res = await getTranscriptSegments({
       meetingId: props.meetingId,
@@ -809,9 +882,67 @@ async function initDrawerData() {
   } catch (e) {}
 }
 
+let termEventSource = null
+
+function connectTermSse(targetMeetingId) {
+  disconnectTermSse()
+  if (!targetMeetingId || typeof EventSource === 'undefined') return
+  const sseUrl = getTermEventsSseUrl(targetMeetingId)
+  if (!sseUrl) return
+  try {
+    const es = new EventSource(sseUrl)
+    es.addEventListener('TERM_DETECTED', (evt) => {
+      try {
+        const payload = JSON.parse(evt.data)
+        aiStore.handleRealtimeTermDetected(payload)
+      } catch (err) {}
+    })
+    es.onerror = () => {}
+    termEventSource = es
+  } catch (err) {}
+}
+
+function disconnectTermSse() {
+  if (termEventSource) {
+    termEventSource.close()
+    termEventSource = null
+  }
+}
+
+async function handleToggleDrawerTermFeature(enabled) {
+  if (!props.meetingId) return
+  await aiStore.updateTermConfig({ termIntelligenceEnabled: enabled }, props.meetingId)
+}
+
+async function handleDrawerAnalyzeTerms() {
+  if (!props.meetingId) return
+  await aiStore.triggerMeetingTermAnalysis(
+    {
+      domainHint: aiStore.featureConfig.domainHint || undefined,
+      targetLang: aiStore.featureConfig.preferredLang || 'zh'
+    },
+    props.meetingId
+  )
+}
+
+function handleJumpTermEvidence(ev) {
+  if (!ev || !ev.segmentId) return
+  const matchedIdx = realtimeSegments.value.findIndex((s) => s.segmentId === ev.segmentId)
+  if (matchedIdx !== -1) {
+    activeTab.value = 'realtime'
+    focusedLiveKey.value = getLiveSegKey(realtimeSegments.value[matchedIdx], matchedIdx)
+    return
+  }
+  workspaceModalOpen.value = true
+  nextTick(() => {
+    aiStore.jumpToSegment(ev.segmentId, ev.startTime)
+  })
+}
+
 let unbindWsTranscript = null
 let unbindWsDecision = null
 let unbindWsMinutes = null
+let unbindWsTerms = null
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
@@ -821,6 +952,7 @@ onMounted(async () => {
     aiStore.initMeeting(props.meetingId)
   }
   initDrawerData()
+  connectTermSse(props.meetingId)
   if (props.meetingId) {
     try {
       await aiStore.fetchFeatureStatus(props.meetingId)
@@ -861,6 +993,13 @@ onMounted(async () => {
       }
     })
 
+    unbindWsTerms = props.onWs(31, (data) => {
+      const termPayload = data?.meesageContent || data
+      if (termPayload) {
+        aiStore.handleRealtimeTermDetected(termPayload)
+      }
+    })
+
     unbindWsMinutes = props.onWs(22, async (data) => {
       console.log('💡 收到会议纪要与多 Agent 流水线分析完成广播 (type 22):', data)
       const targetId = props.meetingId || data?.meetingId || data?.meesageContent?.meetingId
@@ -891,6 +1030,10 @@ onUnmounted(() => {
   if (typeof unbindWsMinutes === 'function') {
     unbindWsMinutes()
   }
+  if (typeof unbindWsTerms === 'function') {
+    unbindWsTerms()
+  }
+  disconnectTermSse()
 })
 </script>
 
@@ -1386,6 +1529,54 @@ onUnmounted(() => {
   padding: 10px 14px;
   background: #ffffff;
   border-top: 1px solid var(--border-color);
+}
+
+.term-drawer-panel {
+  background: #fafafa;
+}
+
+.term-drawer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.term-drawer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.term-switch-label {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.term-domain-tag {
+  margin-right: 0;
+  font-size: 11px;
+}
+
+.term-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.term-drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 @media (max-width: 640px) {

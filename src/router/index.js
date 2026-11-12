@@ -49,6 +49,12 @@ const routes = [
         meta: { title: 'AI 会议工作台 - EasyMeeting' }
       },
       {
+        path: 'terminology',
+        name: 'TerminologyCenter',
+        component: () => import('@/views/terminology/TerminologyCenterView.vue'),
+        meta: { title: '行业术语中心 - EasyMeeting' }
+      },
+      {
         path: 'contacts',
         name: 'Contacts',
         component: () => import('@/views/contacts/ContactsView.vue'),

@@ -166,7 +166,8 @@ import {
   UserOutlined,
   VideoCameraFilled,
   VideoCameraOutlined,
-  LogoutOutlined
+  LogoutOutlined,
+  BookOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { getAvatarUrl } from '@/api/auth'
@@ -180,6 +181,7 @@ const navItems = [
   { path: '/meeting/join', label: '加入会议', icon: LoginOutlined },
   { path: '/meeting/schedule', label: '预约会议', icon: CalendarOutlined },
   { path: '/meeting/history', label: '会议记录', icon: HistoryOutlined },
+  { path: '/terminology', label: '行业术语', icon: BookOutlined },
   { path: '/contacts', label: '通讯录', icon: TeamOutlined },
   { path: '/settings', label: '设置', icon: SettingOutlined }
 ]

@@ -444,3 +444,296 @@ export function getQaHistory(params) {
   })
 }
 
+// ==========================================
+// 9. 行业术语智能理解、LoRA 对比评测与企业术语库 (/term)
+// ==========================================
+
+/**
+ * 直接向微调大模型提问行业术语、公式与上下文含义（模型优先，不依赖预置词典）
+ * @param {Object} params { query, context, domainHint, targetLang, meetingId, modelOverride, adapterVersionOverride }
+ */
+export function askTermKnowledge(params) {
+  return http.post('/meetingAi/term/ask', {
+    query: params.query,
+    context: params.context || undefined,
+    domainHint: params.domainHint || undefined,
+    targetLang: params.targetLang || 'zh',
+    meetingId: params.meetingId || undefined,
+    modelOverride: params.modelOverride || undefined,
+    adapterVersionOverride: params.adapterVersionOverride || undefined
+  }, {
+    timeout: 120000
+  })
+}
+
+/**
+ * 基座模型与微调 LoRA 模型同场景对比评测
+ * @param {Object} params { query, context, domainHint, targetLang, baseModelName, baseAdapterVersion, tunedModelName, tunedAdapterVersion }
+ */
+export function compareTermModels(params) {
+  return http.post('/meetingAi/term/compare', {
+    query: params.query,
+    context: params.context || undefined,
+    domainHint: params.domainHint || undefined,
+    targetLang: params.targetLang || 'zh',
+    baseModelName: params.baseModelName || undefined,
+    baseAdapterVersion: params.baseAdapterVersion || 'base',
+    tunedModelName: params.tunedModelName || undefined,
+    tunedAdapterVersion: params.tunedAdapterVersion || undefined
+  }, {
+    timeout: 240000
+  })
+}
+
+/**
+ * 按对比组 ID 查询模型对比 Trace 审计详情
+ * @param {string} compareGroupId 对比组 ID
+ */
+export function getCompareTermTraces(compareGroupId) {
+  return http.get('/meetingAi/term/compare/traces', {
+    params: { compareGroupId }
+  })
+}
+
+/**
+ * 查询支持的可配置领域清单及模型/适配器元信息
+ */
+export function getTermDomainsMeta() {
+  return http.get('/meetingAi/term/domains')
+}
+
+/**
+ * 手动触发会议术语同步识别与三层解释
+ * @param {Object} params { meetingId, domainHint, targetLang }
+ */
+export function analyzeMeetingTermsSync(params) {
+  return http.post('/meetingAi/term/meeting/analyze', {
+    meetingId: params.meetingId,
+    domainHint: params.domainHint || undefined,
+    targetLang: params.targetLang || 'zh'
+  }, {
+    timeout: 180000
+  })
+}
+
+/**
+ * 触发整场会议的异步幂等术语识别与三层解释任务
+ * @param {Object} params { meetingId, domainHint, targetLang, forceReanalyze }
+ */
+export function analyzeMeetingTermsAsync(params) {
+  return http.post('/meetingAi/term/meeting/analyzeAsync', {
+    meetingId: params.meetingId,
+    domainHint: params.domainHint || undefined,
+    targetLang: params.targetLang || 'zh',
+    forceReanalyze: Boolean(params.forceReanalyze)
+  })
+}
+
+/**
+ * 查询指定会议已识别的行业术语三层解释清单
+ * @param {string} meetingId 会议ID
+ */
+export function getMeetingTermsList(meetingId) {
+  return http.get('/meetingAi/term/meeting/list', {
+    params: { meetingId }
+  })
+}
+
+/**
+ * 查询指定会议持久化保存的总结概览与跨领域因果传导链
+ * @param {string} meetingId 会议ID
+ */
+export function getMeetingCausalChains(meetingId) {
+  return http.get('/meetingAi/term/meeting/causal-chains', {
+    params: { meetingId }
+  })
+}
+
+/**
+ * 查询会议术语原文出现定位明细
+ * @param {string} meetingId 会议ID
+ */
+export function getMeetingTermOccurrences(meetingId) {
+  return http.get('/meetingAi/term/meeting/occurrences', {
+    params: { meetingId }
+  })
+}
+
+/**
+ * 查询会议术语 AI 分析全链路审计日志 (Trace)
+ * @param {string} meetingId 会议ID
+ */
+export function getMeetingTermTraces(meetingId) {
+  return http.get('/meetingAi/term/meeting/traces', {
+    params: { meetingId }
+  })
+}
+
+/**
+ * 人工审核与纠偏会议术语（管理员可选沉淀到 term_verified_cache）
+ * @param {Object} params { occurrenceId, explanationId, reviewStatus, correctedStandardName, correctedDomain, correctedDefinition, correctedContextMeaning, userCorrection, promoteToVerifiedCache }
+ */
+export function correctMeetingTerm(params) {
+  return http.post('/meetingAi/term/meeting/correct', {
+    occurrenceId: params.occurrenceId || undefined,
+    explanationId: params.explanationId || undefined,
+    reviewStatus: params.reviewStatus,
+    correctedStandardName: params.correctedStandardName || undefined,
+    correctedDomain: params.correctedDomain || undefined,
+    correctedDefinition: params.correctedDefinition || undefined,
+    correctedContextMeaning: params.correctedContextMeaning || undefined,
+    userCorrection: params.userCorrection || undefined,
+    promoteToVerifiedCache: Boolean(params.promoteToVerifiedCache)
+  })
+}
+
+/**
+ * 更新会中实时术语识别开关、领域提示与输出语言偏好
+ * @param {Object} params { meetingId, termIntelligenceEnabled, domainHint, preferredLang }
+ */
+export function updateMeetingTermConfig(params) {
+  return http.post('/meetingAi/term/meeting/config', {
+    meetingId: params.meetingId,
+    termIntelligenceEnabled: params.termIntelligenceEnabled,
+    domainHint: params.domainHint ?? '',
+    preferredLang: params.preferredLang || 'zh'
+  })
+}
+
+/**
+ * 获取会中实时术语识别 SSE 事件流 URL（事件名 TERM_DETECTED）
+ * @param {string} meetingId 会议ID
+ */
+export function getTermEventsSseUrl(meetingId) {
+  const base = import.meta.env.VITE_API_BASE_URL || '/api'
+  const token = localStorage.getItem('token') || ''
+  return `${base}/meetingAi/term/meeting/events/sse?meetingId=${encodeURIComponent(meetingId)}&token=${encodeURIComponent(token)}`
+}
+
+/**
+ * 新增或更新企业内部术语（团队共享知识库，传 enterpriseTermId 为更新）
+ */
+export function saveEnterpriseTerm(params) {
+  return http.post('/meetingAi/term/enterprise/save', params)
+}
+
+/**
+ * 查询企业内部术语详情
+ * @param {string} enterpriseTermId 企业术语ID
+ */
+export function getEnterpriseTermDetail(enterpriseTermId) {
+  return http.get('/meetingAi/term/enterprise/detail', {
+    params: { enterpriseTermId }
+  })
+}
+
+/**
+ * 分页查询企业内部术语知识库
+ * @param {Object} params { termCode, abbreviation, domain, subDomain, status, keywordFuzzy, pageNo, pageSize }
+ */
+export function pageEnterpriseTerms(params = {}) {
+  return http.get('/meetingAi/term/enterprise/page', {
+    params: {
+      termCode: params.termCode || undefined,
+      abbreviation: params.abbreviation || undefined,
+      domain: params.domain || undefined,
+      subDomain: params.subDomain || undefined,
+      status: params.status || undefined,
+      keywordFuzzy: params.keywordFuzzy || undefined,
+      pageNo: params.pageNo || 1,
+      pageSize: params.pageSize || 15
+    }
+  })
+}
+
+/**
+ * 切换企业内部术语状态 (ACTIVE / DISABLED / ARCHIVED)
+ * @param {Object} params { enterpriseTermId, status }
+ */
+export function updateEnterpriseTermStatus(params) {
+  return http.post('/meetingAi/term/enterprise/status', {
+    enterpriseTermId: params.enterpriseTermId,
+    status: params.status
+  })
+}
+
+/**
+ * 归档或物理删除企业内部术语
+ * @param {Object} params { enterpriseTermId, physicalDelete }
+ */
+export function deleteEnterpriseTerm(params) {
+  return http.post('/meetingAi/term/enterprise/delete', {
+    enterpriseTermId: params.enterpriseTermId,
+    physicalDelete: Boolean(params.physicalDelete)
+  })
+}
+
+/**
+ * 批量导入企业内部术语
+ * @param {Array} items EnterpriseTermSaveRequest 数组
+ */
+export function batchImportEnterpriseTerms(items) {
+  return http.post('/meetingAi/term/enterprise/batchImport', items)
+}
+
+/**
+ * 按筛选条件导出企业内部术语 JSON 列表
+ * @param {Object} params { domain, status, keywordFuzzy }
+ */
+export function exportEnterpriseTerms(params = {}) {
+  return http.get('/meetingAi/term/enterprise/export', {
+    params: {
+      domain: params.domain || undefined,
+      status: params.status || undefined,
+      keywordFuzzy: params.keywordFuzzy || undefined
+    }
+  })
+}
+
+/**
+ * 管理员：保存或更新可选标准术语审核缓存
+ */
+export function saveVerifiedTermCache(params) {
+  return http.post('/meetingAi/term/cache/save', params)
+}
+
+/**
+ * 管理员：分页查询可选标准术语审核缓存
+ */
+export function pageVerifiedTermCache(params = {}) {
+  return http.get('/meetingAi/term/cache/page', {
+    params: {
+      termKey: params.termKey || undefined,
+      domain: params.domain || undefined,
+      subDomain: params.subDomain || undefined,
+      sourceType: params.sourceType || undefined,
+      reviewStatus: params.reviewStatus || undefined,
+      enabled: params.enabled !== undefined && params.enabled !== '' ? params.enabled : undefined,
+      keywordFuzzy: params.keywordFuzzy || undefined,
+      pageNo: params.pageNo || 1,
+      pageSize: params.pageSize || 15
+    }
+  })
+}
+
+/**
+ * 管理员：启用或停用标准术语缓存条目
+ * @param {Object} params { cacheId, enabled }
+ */
+export function toggleVerifiedTermCache(params) {
+  return http.post('/meetingAi/term/cache/toggle', {
+    cacheId: params.cacheId,
+    enabled: Boolean(params.enabled)
+  })
+}
+
+/**
+ * 管理员：删除标准术语缓存条目
+ * @param {Object} params { cacheId }
+ */
+export function deleteVerifiedTermCache(params) {
+  return http.post('/meetingAi/term/cache/delete', {
+    cacheId: params.cacheId
+  })
+}
+

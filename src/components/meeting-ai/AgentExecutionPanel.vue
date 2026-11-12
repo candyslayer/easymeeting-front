@@ -184,6 +184,8 @@ function formatAgentName(name) {
       return '质量审查与反思 Agent'
     case 'MeetingQaAgent':
       return '知识检索与问答 Agent'
+    case 'TerminologyAgent':
+      return '行业术语智能理解与消歧 Agent'
     default:
       return name || 'AI Agent'
   }

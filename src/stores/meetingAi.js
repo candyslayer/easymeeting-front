@@ -15,7 +15,16 @@ import {
   confirmDecision,
   rejectDecision,
   deferDecision,
-  getDecisionEvents
+  getDecisionEvents,
+  getTermDomainsMeta,
+  getMeetingTermsList,
+  getMeetingCausalChains,
+  getMeetingTermOccurrences,
+  getMeetingTermTraces,
+  analyzeMeetingTermsSync,
+  analyzeMeetingTermsAsync,
+  correctMeetingTerm,
+  updateMeetingTermConfig
 } from '@/api/meetingAi'
 
 export const useMeetingAiStore = defineStore('meetingAi', {
@@ -23,15 +32,32 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     // 当前工作空间绑定的会议 ID 与元数据
     currentMeetingId: '',
     meetingInfo: null,
-    activeTab: 'overview', // 'overview' | 'transcript' | 'recording' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'qa' | 'agents'
+    activeTab: 'overview', // 'overview' | 'transcript' | 'recording' | 'minutes' | 'topics' | 'decisions' | 'actionItems' | 'terminology' | 'qa' | 'agents'
 
     // 会议级功能配置与统一 ASR 引擎状态
     featureConfig: {
       transcriptionEnabled: false,
       liveDecisionEnabled: false,
-      asrRunning: false
+      asrRunning: false,
+      termIntelligenceEnabled: true,
+      domainHint: '',
+      preferredLang: 'zh'
     },
     featureLoading: false,
+
+    // 行业术语智能理解状态
+    meetingTerms: [],
+    meetingTermsLoading: false,
+    meetingCausalChains: [],
+    meetingCausalSummary: '',
+    meetingCausalMeta: null,
+    causalChainsLoading: false,
+    termOccurrences: [],
+    termOccurrencesLoading: false,
+    termTraces: [],
+    termTracesLoading: false,
+    termDomainsMeta: null,
+    terminologyAnalyzing: false,
 
     // 录音文件管理
     recordings: [],
@@ -74,6 +100,9 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     isAsrRunning: (state) => Boolean(state.featureConfig?.asrRunning),
     isTranscriptionEnabled: (state) => Boolean(state.featureConfig?.transcriptionEnabled),
     isLiveDecisionEnabled: (state) => Boolean(state.featureConfig?.liveDecisionEnabled),
+    isTermIntelligenceEnabled: (state) => state.featureConfig?.termIntelligenceEnabled !== false,
+    conflictDualTermsCount: (state) => state.meetingTerms.filter((t) => t.ambiguityStatus === 'CONFLICT_DUAL').length,
+    ambiguousTermsCount: (state) => state.meetingTerms.filter((t) => t.ambiguityStatus === 'AMBIGUOUS' || t.ambiguityStatus === 'UNRESOLVED').length,
 
     // 纪要状态枚举文本
     minutesStatusLabel: (state) => {
@@ -254,7 +283,10 @@ export const useMeetingAiStore = defineStore('meetingAi', {
           this.featureConfig = {
             transcriptionEnabled: Boolean(config.transcriptionEnabled),
             liveDecisionEnabled: Boolean(config.liveDecisionEnabled),
-            asrRunning: Boolean(config.asrRunning)
+            asrRunning: Boolean(config.asrRunning),
+            termIntelligenceEnabled: config.termIntelligenceEnabled !== false,
+            domainHint: config.domainHint || '',
+            preferredLang: config.preferredLang || 'zh'
           }
         }
       } catch (err) {
@@ -281,7 +313,10 @@ export const useMeetingAiStore = defineStore('meetingAi', {
           this.featureConfig = {
             transcriptionEnabled: Boolean(config.transcriptionEnabled),
             liveDecisionEnabled: Boolean(config.liveDecisionEnabled),
-            asrRunning: Boolean(config.asrRunning)
+            asrRunning: Boolean(config.asrRunning),
+            termIntelligenceEnabled: config.termIntelligenceEnabled !== false,
+            domainHint: config.domainHint || '',
+            preferredLang: config.preferredLang || 'zh'
           }
         }
         const label = feature === 'transcription' ? '实时语音转写' : '会中决策识别'
@@ -499,8 +534,310 @@ export const useMeetingAiStore = defineStore('meetingAi', {
         this.loadTranscriptSegments(mid, 1, this.transcriptPageSize),
         this.loadMinutes(mid),
         this.loadDecisions(mid),
-        this.loadActionItems(mid)
+        this.loadActionItems(mid),
+        this.loadMeetingTerms(mid)
       ])
+    },
+
+    /**
+     * 加载支持的行业领域列表与当前模型/LoRA版本元信息
+     */
+    async loadTermDomainsMeta() {
+      if (this.termDomainsMeta) return this.termDomainsMeta
+      try {
+        const meta = await getTermDomainsMeta()
+        this.termDomainsMeta = meta
+        return meta
+      } catch (err) {
+        console.warn('获取术语领域与模型元信息失败', err)
+        return null
+      }
+    },
+
+    /**
+     * 更新会中实时术语开关、领域提示或目标语言偏好
+     */
+    async updateTermConfig(partial = {}, meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return null
+      this.featureLoading = true
+      try {
+        const payload = {
+          meetingId: mid,
+          termIntelligenceEnabled:
+            partial.termIntelligenceEnabled !== undefined
+              ? Boolean(partial.termIntelligenceEnabled)
+              : this.featureConfig.termIntelligenceEnabled !== false,
+          domainHint:
+            partial.domainHint !== undefined ? partial.domainHint : this.featureConfig.domainHint,
+          preferredLang:
+            partial.preferredLang !== undefined ? partial.preferredLang : this.featureConfig.preferredLang
+        }
+        const config = await updateMeetingTermConfig(payload)
+        if (config) {
+          this.featureConfig = {
+            ...this.featureConfig,
+            termIntelligenceEnabled: config.termIntelligenceEnabled !== false,
+            domainHint: config.domainHint || '',
+            preferredLang: config.preferredLang || 'zh'
+          }
+        }
+        message.success('实时术语理解配置已更新')
+        return config
+      } catch (err) {
+        message.error(err.message || '更新术语配置失败')
+        throw err
+      } finally {
+        this.featureLoading = false
+      }
+    },
+
+    /**
+     * 加载会议已识别的行业术语三层解释清单
+     */
+    async loadMeetingTerms(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return []
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
+      this.meetingTermsLoading = true
+      try {
+        const list = await getMeetingTermsList(mid)
+        this.meetingTerms = Array.isArray(list) ? list : []
+        return this.meetingTerms
+      } catch (err) {
+        console.warn('获取会议术语解释清单失败', err)
+        return []
+      } finally {
+        this.meetingTermsLoading = false
+      }
+    },
+
+    /**
+     * 加载会议总结概览与跨领域因果传导链
+     */
+    async loadMeetingCausalChains(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return null
+      this.causalChainsLoading = true
+      try {
+        const res = await getMeetingCausalChains(mid)
+        if (res) {
+          this.meetingCausalChains = Array.isArray(res.causalChains) ? res.causalChains : []
+          if (res.summary) {
+            this.meetingCausalSummary = res.summary
+          }
+          this.meetingCausalMeta = {
+            status: res.status,
+            traceId: res.traceId,
+            modelName: res.modelName,
+            modelVersion: res.modelVersion,
+            adapterVersion: res.adapterVersion,
+            costMs: res.costMs
+          }
+        }
+        return res
+      } catch (err) {
+        console.warn('获取会议跨域因果传导链失败', err)
+        return null
+      } finally {
+        this.causalChainsLoading = false
+      }
+    },
+
+    /**
+     * 加载会议术语原文出现定位明细
+     */
+    async loadTermOccurrences(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return []
+      this.termOccurrencesLoading = true
+      try {
+        const list = await getMeetingTermOccurrences(mid)
+        this.termOccurrences = Array.isArray(list) ? list : []
+        return this.termOccurrences
+      } catch (err) {
+        console.warn('获取术语原文出现记录失败', err)
+        return []
+      } finally {
+        this.termOccurrencesLoading = false
+      }
+    },
+
+    /**
+     * 加载会议术语 Trace 全链路审计记录
+     */
+    async loadTermTraces(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return []
+      this.termTracesLoading = true
+      try {
+        const list = await getMeetingTermTraces(mid)
+        this.termTraces = Array.isArray(list) ? list : []
+        return this.termTraces
+      } catch (err) {
+        console.warn('获取术语分析 Trace 失败', err)
+        return []
+      } finally {
+        this.termTracesLoading = false
+      }
+    },
+
+    /**
+     * 手动触发会议术语同步分析
+     */
+    async triggerMeetingTermAnalysis(options = {}, meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return null
+      this.terminologyAnalyzing = true
+      try {
+        const res = await analyzeMeetingTermsSync({
+          meetingId: mid,
+          domainHint: options.domainHint !== undefined ? options.domainHint : this.featureConfig.domainHint,
+          targetLang: options.targetLang || this.featureConfig.preferredLang || 'zh'
+        })
+        if (res && Array.isArray(res.terms)) {
+          this.handleRealtimeTermDetected(res.terms, { notify: false })
+        }
+        if (res) {
+          if (Array.isArray(res.causalChains)) {
+            this.meetingCausalChains = res.causalChains
+          }
+          if (res.summary) {
+            this.meetingCausalSummary = res.summary
+          }
+          this.meetingCausalMeta = {
+            status: res.status,
+            traceId: res.traceId,
+            modelName: res.modelName,
+            modelVersion: res.modelVersion,
+            adapterVersion: res.adapterVersion,
+            costMs: res.costMs
+          }
+        }
+        await Promise.allSettled([
+          this.loadMeetingTerms(mid),
+          this.loadMeetingCausalChains(mid),
+          this.loadTermOccurrences(mid),
+          this.loadTermTraces(mid)
+        ])
+        if (res?.status === 'DEGRADED') {
+          message.warning(res.summary || '大模型暂不可用，已诚实返回降级参考结果')
+        } else {
+          message.success(res?.summary || '行业术语同步识别完成')
+        }
+        return res
+      } catch (err) {
+        message.error(err.message || '会议术语同步分析失败')
+        throw err
+      } finally {
+        this.terminologyAnalyzing = false
+      }
+    },
+
+    /**
+     * 手动触发会议术语异步幂等分析并开启任务轮询
+     */
+    async triggerMeetingTermAnalysisAsync(options = {}, meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return null
+      this.isAnalyzing = true
+      try {
+        const task = await analyzeMeetingTermsAsync({
+          meetingId: mid,
+          domainHint: options.domainHint !== undefined ? options.domainHint : this.featureConfig.domainHint,
+          targetLang: options.targetLang || this.featureConfig.preferredLang || 'zh',
+          forceReanalyze: Boolean(options.forceReanalyze)
+        })
+        this.currentTask = task
+        message.success('已发起异步行业术语智能理解任务')
+        if (task && task.taskId) {
+          this.startTaskPolling(task.taskId, mid)
+        }
+        return task
+      } catch (err) {
+        message.error(err.message || '发起异步术语分析失败')
+        this.isAnalyzing = false
+        throw err
+      }
+    },
+
+    /**
+     * 提交人工审核与纠偏
+     */
+    async correctTermAction(payload) {
+      try {
+        const updated = await correctMeetingTerm(payload)
+        if (updated) {
+          const idx = this.meetingTerms.findIndex(
+            (t) =>
+              (payload.occurrenceId && t.occurrenceId === payload.occurrenceId) ||
+              (payload.explanationId && t.explanationId === payload.explanationId)
+          )
+          if (idx !== -1) {
+            this.meetingTerms[idx] = { ...this.meetingTerms[idx], ...updated }
+          }
+        }
+        await Promise.allSettled([
+          this.loadMeetingTerms(this.currentMeetingId),
+          this.loadTermOccurrences(this.currentMeetingId)
+        ])
+        message.success('术语审核纠偏结论已保存')
+        return updated
+      } catch (err) {
+        message.error(err.message || '提交术语纠偏失败')
+        throw err
+      }
+    },
+
+    /**
+     * 处理 WebSocket (messageType=31) 或 SSE (TERM_DETECTED) 推送的实时术语
+     */
+    handleRealtimeTermDetected(rawPayload, { notify = true } = {}) {
+      const items = Array.isArray(rawPayload)
+        ? rawPayload
+        : Array.isArray(rawPayload?.terms)
+          ? rawPayload.terms
+          : rawPayload
+            ? [rawPayload]
+            : []
+      if (items.length === 0) return
+
+      let newlyAdded = 0
+      let hasConflict = false
+      items.forEach((item) => {
+        if (!item || (!item.surface && !item.canonicalName)) return
+        if (item.ambiguityStatus === 'CONFLICT_DUAL') {
+          hasConflict = true
+        }
+        const itemKey = item.occurrenceId
+          ? `occ:${item.occurrenceId}`
+          : `${(item.surface || '').toLowerCase()}|${(item.canonicalName || '').toLowerCase()}|${item.evidence?.[0]?.segmentId || ''}`
+        const existIdx = this.meetingTerms.findIndex((existing) => {
+          const existingKey = existing.occurrenceId
+            ? `occ:${existing.occurrenceId}`
+            : `${(existing.surface || '').toLowerCase()}|${(existing.canonicalName || '').toLowerCase()}|${existing.evidence?.[0]?.segmentId || ''}`
+          return existingKey === itemKey
+        })
+        if (existIdx !== -1) {
+          this.meetingTerms[existIdx] = { ...this.meetingTerms[existIdx], ...item }
+        } else {
+          this.meetingTerms.unshift(item)
+          newlyAdded++
+        }
+      })
+
+      if (notify && newlyAdded > 0) {
+        const names = items
+          .map((t) => t.surface || t.canonicalName)
+          .filter(Boolean)
+          .slice(0, 4)
+          .join('、')
+        notification.info({
+          message: hasConflict ? '识别到行业术语（含企业口径冲突）' : '实时识别到行业专业术语',
+          description: `${names}${hasConflict ? ' — 已并排展示通用行业含义与企业内部口径' : ''}`,
+          duration: 3.5
+        })
+      }
     },
 
     /**
@@ -562,7 +899,11 @@ export const useMeetingAiStore = defineStore('meetingAi', {
                 await Promise.allSettled([
                   this.loadMinutes(effectiveMeetingId),
                   this.loadDecisions(effectiveMeetingId),
-                  this.loadActionItems(effectiveMeetingId)
+                  this.loadActionItems(effectiveMeetingId),
+                  this.loadMeetingTerms(effectiveMeetingId),
+                  this.loadMeetingCausalChains(effectiveMeetingId),
+                  this.loadTermOccurrences(effectiveMeetingId),
+                  this.loadTermTraces(effectiveMeetingId)
                 ])
               }
             } else if (task.taskStatus === 'FAILED') {
@@ -599,9 +940,23 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       this.featureConfig = {
         transcriptionEnabled: false,
         liveDecisionEnabled: false,
-        asrRunning: false
+        asrRunning: false,
+        termIntelligenceEnabled: true,
+        domainHint: '',
+        preferredLang: 'zh'
       }
       this.featureLoading = false
+      this.meetingTerms = []
+      this.meetingTermsLoading = false
+      this.meetingCausalChains = []
+      this.meetingCausalSummary = ''
+      this.meetingCausalMeta = null
+      this.causalChainsLoading = false
+      this.termOccurrences = []
+      this.termOccurrencesLoading = false
+      this.termTraces = []
+      this.termTracesLoading = false
+      this.terminologyAnalyzing = false
       this.recordings = []
       this.recordingsLoading = false
       this.transcriptSegments = []

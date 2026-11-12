@@ -274,6 +274,10 @@ export function useWebSocket() {
           emit('decision_event', data.meesageContent || data)
           break
 
+        case 31: // TERM_DETECTED: 会中行业术语实时识别与解释推送
+          emit('term_detected', data.meesageContent || data)
+          break
+
         default:
           break
       }

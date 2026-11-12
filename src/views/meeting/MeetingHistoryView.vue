@@ -152,6 +152,9 @@
                     <a-menu-item key="actionItems" @click="goToAiWorkspace(record, 'actionItems')">
                       <UnorderedListOutlined /> 查看待办事项
                     </a-menu-item>
+                    <a-menu-item key="terminology" @click="goToAiWorkspace(record, 'terminology')">
+                      <BookOutlined /> 查看行业术语
+                    </a-menu-item>
                     <a-menu-divider />
                     <a-menu-item v-if="record.status === 1" key="relaunch" @click="relaunchMeeting(record)">
                       <ReloadOutlined /> 再开一场
@@ -238,7 +241,8 @@ import {
   UnorderedListOutlined,
   DeleteOutlined,
   ShareAltOutlined,
-  TeamOutlined
+  TeamOutlined,
+  BookOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import {
