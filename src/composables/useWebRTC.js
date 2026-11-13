@@ -75,11 +75,11 @@ export function useWebRTC(websocketService, localStreamRef) {
         remoteStreams[remoteUserId] = markRaw(new MediaStream(remoteStreams[remoteUserId].getTracks()))
       }
 
-      event.track.onunmute = () => {
+      event.track.addEventListener('unmute', () => {
         if (remoteStreams[remoteUserId]) {
           remoteStreams[remoteUserId] = markRaw(new MediaStream(remoteStreams[remoteUserId].getTracks()))
         }
-      }
+      })
     }
 
     // 4. 连接状态监听
@@ -212,19 +212,40 @@ export function useWebRTC(websocketService, localStreamRef) {
   }
 
   /**
-   * 替换所有对端连接中的视频/音频轨道（例如切换屏幕共享流或切换摄像头）
-   * @param {MediaStreamTrack} newTrack 
-   * @param {'video'|'audio'} kind 
+   * 替换或补充所有对端连接中的视频/音频轨道（例如切换屏幕共享、切换摄像头或后开启媒体）
+   * @param {MediaStreamTrack|null} newTrack
+   * @param {'video'|'audio'} kind
    */
   async function replaceTrackForAllPeers(newTrack, kind = 'video') {
     for (const [userId, pc] of peerConnections.entries()) {
       try {
         const senders = pc.getSenders()
-        const targetSender = senders.find((s) => s.track && s.track.kind === kind)
-        if (targetSender) {
-          await targetSender.replaceTrack(newTrack)
-        } else if (newTrack && localStreamRef.value) {
+        const activeSender = senders.find((s) => s.track && s.track.kind === kind)
+        if (activeSender) {
+          await activeSender.replaceTrack(newTrack)
+          continue
+        }
+
+        if (!newTrack) continue
+
+        // 检查是否已有该媒体类型的 transceiver（例如入会时仅收未发导致的 recvonly）
+        const transceiver = pc
+          .getTransceivers?.()
+          .find((t) => t.receiver?.track?.kind === kind || t.sender?.track?.kind === kind)
+
+        if (transceiver?.sender) {
+          await transceiver.sender.replaceTrack(newTrack)
+          if (transceiver.direction === 'recvonly' || transceiver.direction === 'inactive') {
+            transceiver.direction = 'sendrecv'
+            if (pc.signalingState === 'stable') {
+              await initiateOffer(userId)
+            }
+          }
+        } else if (localStreamRef.value) {
           pc.addTrack(newTrack, localStreamRef.value)
+          if (pc.signalingState === 'stable') {
+            await initiateOffer(userId)
+          }
         }
       } catch (err) {
         console.error(`为对端 ${userId} 替换 ${kind} 轨道失败:`, err)
