@@ -133,6 +133,16 @@
                 <RobotOutlined /> AI 工作台
               </a-button>
 
+              <!-- 智能回放直接入口 (直达斗鱼/虎牙大屏放映厅) -->
+              <a-button
+                type="primary"
+                ghost
+                size="small"
+                @click="goToReplay(record)"
+              >
+                <VideoCameraOutlined style="color: #ff5722" /> 智能回放
+              </a-button>
+
               <!-- 更多下拉操作 -->
               <a-dropdown placement="bottomRight">
                 <a-button size="small">
@@ -140,6 +150,9 @@
                 </a-button>
                 <template #overlay>
                   <a-menu>
+                    <a-menu-item key="replay" @click="goToReplay(record)">
+                      <VideoCameraOutlined style="color: #ff5722" /> 智能回放放映厅
+                    </a-menu-item>
                     <a-menu-item key="minutes" @click="goToAiWorkspace(record, 'minutes')">
                       <FileTextOutlined /> 查看会议纪要
                     </a-menu-item>
@@ -418,6 +431,10 @@ function goToAiWorkspace(record, tab = 'overview') {
     path: `/meeting/ai/${record.meetingId}`,
     query: tab !== 'overview' ? { tab } : undefined
   })
+}
+
+function goToReplay(record) {
+  router.push(`/meeting/replay/${record.meetingId}`)
 }
 
 async function handleTriggerAiAnalysis(record) {

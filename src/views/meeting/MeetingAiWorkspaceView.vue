@@ -93,6 +93,27 @@
       <main class="workspace-main">
         <!-- 1. 会议概览 -->
         <div v-show="currentTab === 'overview'" class="tab-container overview-tab">
+          <!-- 智能回放与高能拖动条回溯快捷通道 -->
+          <div class="replay-quick-banner" @click="goToReplayTheater">
+            <div class="banner-left">
+              <div class="banner-icon-box">
+                <VideoCameraOutlined />
+              </div>
+              <div class="banner-text">
+                <div class="banner-title">
+                  AI 会议智能回放放映厅
+                  <a-tag color="red" style="margin-left: 8px">● 斗鱼/虎牙大屏影院模式</a-tag>
+                </div>
+                <div class="banner-desc">
+                  全新沉浸式放映厅体验：左侧超大屏超清播放器（内置秒级高能议题拖动条），右侧议题节目单互动栏，点击秒级定位现场讨论。
+                </div>
+              </div>
+            </div>
+            <a-button type="primary" class="banner-enter-btn" @click.stop="goToReplayTheater">
+              进入独立放映厅 <RightOutlined />
+            </a-button>
+          </div>
+
           <div class="overview-grid">
             <!-- 会议核心指标卡片 -->
             <div class="stat-card">
@@ -188,6 +209,20 @@
           </div>
         </div>
 
+        <!-- 智能回放与议题时间轴 -->
+        <div v-show="currentTab === 'replay'" class="tab-container replay-tab-container">
+          <div class="theater-redirect-bar">
+            <div class="bar-left">
+              <span class="bar-tag">斗鱼/虎牙大屏放映厅</span>
+              <span class="bar-hint">EasyMeeting 已支持沉浸式全屏影院回放，享受超大播放窗口与右侧议题互动节目单：</span>
+            </div>
+            <a-button type="primary" size="small" @click="goToReplayTheater">
+              <FullscreenOutlined /> 进入独立全屏放映厅
+            </a-button>
+          </div>
+          <ReplayWorkspace :meeting-id="meetingId" />
+        </div>
+
         <!-- 2. 转写记录 -->
         <div v-show="currentTab === 'transcript'" class="tab-container">
           <TranscriptPanel
@@ -274,6 +309,7 @@ import { formatMeetingNo, formatDateTime } from '@/utils/format'
 import { loadMeetingHistory } from '@/api/meeting'
 
 // 子面板组件
+import ReplayWorkspace from '@/components/meeting-ai/ReplayWorkspace.vue'
 import TranscriptPanel from '@/components/meeting-ai/TranscriptPanel.vue'
 import RecordingManager from '@/components/meeting-ai/RecordingManager.vue'
 import MinutesPanel from '@/components/meeting-ai/MinutesPanel.vue'
@@ -303,6 +339,7 @@ const currentTab = computed({
 
 const navTabs = computed(() => [
   { key: 'overview', label: '会议概览', icon: AppstoreOutlined },
+  { key: 'replay', label: '智能回放', icon: VideoCameraOutlined },
   { key: 'transcript', label: '转写记录', icon: FileTextOutlined, badge: aiStore.transcriptTotal },
   { key: 'recording', label: '录音管理', icon: AudioOutlined, badge: aiStore.recordings.length },
   { key: 'minutes', label: '会议纪要', icon: FileTextOutlined },
@@ -316,6 +353,10 @@ const navTabs = computed(() => [
 
 function switchTab(tabKey) {
   currentTab.value = tabKey
+}
+
+function goToReplayTheater() {
+  router.push(`/meeting/replay/${meetingId.value}`)
 }
 
 function handleGoBack() {
@@ -595,6 +636,90 @@ onUnmounted(() => {
   padding-right: 4px;
 }
 
+.replay-quick-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #e6f4ff 0%, #f0f5ff 100%);
+  border: 1px solid #adc6ff;
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.06);
+}
+
+.replay-quick-banner:hover {
+  border-color: #1677ff;
+  box-shadow: 0 4px 14px rgba(22, 119, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.banner-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.banner-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: #1677ff;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+.banner-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1f1f;
+  display: flex;
+  align-items: center;
+}
+
+.banner-desc {
+  font-size: 13px;
+  color: #595959;
+  margin-top: 2px;
+}
+
+.theater-redirect-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #111b26;
+  border: 1px solid #1677ff;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.2);
+}
+
+.theater-redirect-bar .bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theater-redirect-bar .bar-tag {
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.theater-redirect-bar .bar-hint {
+  color: #e6f4ff;
+  font-size: 13px;
+}
+
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -818,6 +943,10 @@ onUnmounted(() => {
 
   .workspace-main {
     padding: 10px 8px;
+  }
+
+  .replay-quick-banner {
+    padding: 10px 12px;
   }
 
   .overview-grid {

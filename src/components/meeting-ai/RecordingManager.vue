@@ -3,8 +3,8 @@
     <!-- 顶部上传区域 -->
     <div class="upload-section">
       <div class="section-header">
-        <h3 class="section-title">会议录音上传与管理</h3>
-        <span class="tip-text">支持 mp3, wav, m4a, aac, webm, ogg 格式音频（单文件建议小于 500MB）</span>
+        <h3 class="section-title">会议音视频录像上传与管理</h3>
+        <span class="tip-text">支持 mp3, wav, m4a, aac 音频及 mp4, mkv, mov 等会议录像视频</span>
       </div>
 
       <div class="upload-dropzone">
@@ -15,16 +15,16 @@
           :before-upload="beforeUpload"
           :custom-request="handleCustomUpload"
           :disabled="uploading"
-          accept=".mp3,.wav,.m4a,.aac,.webm,.ogg"
+          accept=".mp3,.wav,.m4a,.aac,.webm,.ogg,.mp4,.mkv,.mov,.avi"
         >
           <p class="ant-upload-drag-icon">
             <InboxOutlined :style="{ color: uploading ? '#faad14' : '#1677ff' }" />
           </p>
           <p class="ant-upload-text">
-            {{ uploading ? `正在上传音频文件... (${uploadPercent}%)` : '点击或将会议录音文件拖拽至此处上传' }}
+            {{ uploading ? `正在上传录像/录音文件... (${uploadPercent}%)` : '点击或将会议录音/录像拖拽至此处上传' }}
           </p>
           <p class="ant-upload-hint">
-            上传成功后将保存到 EasyMeeting 音频云存储，可随时在线播放或发起离线 ASR 语音转写。
+            视频文件将自动进行 HLS 切片转码与 AI 智能回放时间轴识别；音频文件可发起离线 ASR 逐字转写。
           </p>
         </a-upload-dragger>
         <a-progress
@@ -43,8 +43,27 @@
           <SoundOutlined style="color: #1677ff" />
           <span class="ellipsis">{{ activeRecording?.fileName || '音频播放中' }}</span>
         </div>
-        <a-button type="text" size="small" @click="closeAudioPlayer">关闭播放器</a-button>
+        <div class="player-header-actions">
+          <a-button type="primary" size="small" ghost @click="goToReplay(activeRecording)">
+            <VideoCameraOutlined /> 智能回放工作台
+          </a-button>
+          <a-button type="text" size="small" @click="closeAudioPlayer">关闭</a-button>
+        </div>
       </div>
+
+      <!-- 智能议题拖动条 -->
+      <div class="manager-scrubber-wrap">
+        <ReplayProgressBar
+          :duration-ms="audioDurationMs"
+          :current-time-ms="audioCurrentTimeMs"
+          :topics="replayStore.topics"
+          :events="replayStore.allEvents"
+          :active-topic-id="replayStore.activeTopicId"
+          :active-event-id="replayStore.activeEventId"
+          @seek="seekAudioTime"
+        />
+      </div>
+
       <audio
         ref="audioElementRef"
         :src="activeAudioUrl"
@@ -52,6 +71,7 @@
         autoplay
         class="custom-audio"
         @timeupdate="handleAudioTimeUpdate"
+        @loadedmetadata="handleAudioLoadedMetadata"
       ></audio>
     </div>
 
@@ -79,12 +99,20 @@
           <!-- 文件名 -->
           <template v-if="column.key === 'fileName'">
             <div class="file-name-cell">
-              <AudioOutlined style="color: #1677ff; font-size: 16px" />
+              <VideoCameraOutlined v-if="record.mediaType === 'VIDEO'" style="color: #1677ff; font-size: 16px" />
+              <AudioOutlined v-else style="color: #52c41a; font-size: 16px" />
               <div class="name-info ellipsis">
                 <span class="file-title ellipsis" :title="record.fileName">{{ record.fileName }}</span>
-                <span class="file-format-badge">{{ record.fileFormat?.toUpperCase() || 'AUDIO' }}</span>
+                <span class="file-format-badge">{{ record.fileFormat?.toUpperCase() || (record.mediaType === 'VIDEO' ? 'MP4' : 'AUDIO') }}</span>
               </div>
             </div>
+          </template>
+
+          <!-- 媒体类型 -->
+          <template v-else-if="column.key === 'mediaType'">
+            <a-tag :color="record.mediaType === 'VIDEO' ? 'blue' : 'green'">
+              {{ record.mediaType === 'VIDEO' ? '视频录像' : '音频录音' }}
+            </a-tag>
           </template>
 
           <!-- 文件大小与时长 -->
@@ -96,9 +124,15 @@
             <span>{{ record.durationSeconds ? formatSeconds(record.durationSeconds) : '未知' }}</span>
           </template>
 
-          <!-- 转写状态 -->
+          <!-- 转写/切片处理状态 -->
           <template v-else-if="column.key === 'status'">
-            <a-tag :color="getStatusColor(record.status)">
+            <a-tag v-if="record.processingStatus" :color="getProcessingTagColor(record.processingStatus)">
+              <SyncOutlined v-if="record.processingStatus === 'PROCESSING' || record.processingStatus === 'UPLOADED'" :spin="true" />
+              <CheckCircleOutlined v-else-if="record.processingStatus === 'READY'" />
+              <CloseCircleOutlined v-else-if="record.processingStatus === 'FAILED'" />
+              {{ getProcessingTagLabel(record.processingStatus) }}
+            </a-tag>
+            <a-tag v-else :color="getStatusColor(record.status)">
               <component :is="getStatusIcon(record.status)" :spin="record.status === 1" />
               {{ getStatusLabel(record.status) }}
             </a-tag>
@@ -107,8 +141,20 @@
           <!-- 操作 -->
           <template v-else-if="column.key === 'actions'">
             <div class="action-btn-row">
-              <!-- 在线播放 -->
+              <!-- 智能回放 (视频专属) -->
               <a-button
+                v-if="record.mediaType === 'VIDEO' || record.processingStatus"
+                type="primary"
+                size="small"
+                ghost
+                @click="goToReplay(record)"
+              >
+                <VideoCameraOutlined /> 智能回放
+              </a-button>
+
+              <!-- 音频在线试听 -->
+              <a-button
+                v-if="record.mediaType !== 'VIDEO'"
                 type="link"
                 size="small"
                 @click="playRecording(record)"
@@ -119,9 +165,8 @@
               <!-- 发起 ASR 转写 (若处于 0-待处理 或 3-失败) -->
               <a-button
                 v-if="record.status === 0 || record.status === 3"
-                type="primary"
+                type="link"
                 size="small"
-                ghost
                 :loading="transcribingId === record.recordingId"
                 @click="handleStartTranscription(record)"
               >
@@ -138,15 +183,19 @@
                 <FileTextOutlined /> 查看转写
               </a-button>
 
-              <!-- 转写中 -->
-              <a-button
-                v-else-if="record.status === 1"
-                type="link"
-                size="small"
-                disabled
+              <!-- 删除录像文件 -->
+              <a-popconfirm
+                title="确定删除此录像文件？"
+                description="删除后将清理磁盘媒体文件与转码分片，已生成的议题、决策和会议纪要数据将完整保留。"
+                ok-text="确认删除"
+                cancel-text="取消"
+                ok-type="danger"
+                @confirm="handleDeleteRecording(record)"
               >
-                <SyncOutlined :spin="true" /> 转写中...
-              </a-button>
+                <a-button type="link" danger size="small">
+                  <DeleteOutlined /> 删除
+                </a-button>
+              </a-popconfirm>
             </div>
           </template>
         </template>
@@ -157,11 +206,13 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   InboxOutlined,
   ReloadOutlined,
   AudioOutlined,
+  VideoCameraOutlined,
   CaretRightOutlined,
   PlayCircleOutlined,
   FileTextOutlined,
@@ -169,7 +220,8 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  SoundOutlined
+  SoundOutlined,
+  DeleteOutlined
 } from '@ant-design/icons-vue'
 import {
   uploadRecording,
@@ -177,7 +229,10 @@ import {
   startTranscription,
   getRecordingPlayUrl
 } from '@/api/meetingAi'
+import { uploadVideoRecording, deleteRecording } from '@/api/meetingReplay'
 import { useMeetingAiStore } from '@/stores/meetingAi'
+import { useMeetingReplayStore } from '@/stores/meetingReplay'
+import ReplayProgressBar from './ReplayProgressBar.vue'
 
 const props = defineProps({
   meetingId: {
@@ -188,7 +243,9 @@ const props = defineProps({
 
 const emit = defineEmits(['viewTranscript'])
 
+const router = useRouter()
 const aiStore = useMeetingAiStore()
+const replayStore = useMeetingReplayStore()
 
 const loading = ref(false)
 const recordings = ref([])
@@ -200,14 +257,17 @@ const transcribingId = ref('')
 const activeAudioUrl = ref('')
 const activeRecording = ref(null)
 const audioElementRef = ref(null)
+const audioCurrentTimeMs = ref(0)
+const audioDurationMs = ref(0)
 
 const columns = [
-  { title: '录音文件名', dataIndex: 'fileName', key: 'fileName' },
+  { title: '录音/录像文件名', dataIndex: 'fileName', key: 'fileName' },
+  { title: '类型', dataIndex: 'mediaType', key: 'mediaType', width: 90 },
   { title: '文件大小', dataIndex: 'fileSize', key: 'fileSize', width: 110 },
-  { title: '音频时长', dataIndex: 'duration', key: 'duration', width: 100 },
-  { title: '转写状态', dataIndex: 'status', key: 'status', width: 130 },
+  { title: '媒体时长', dataIndex: 'duration', key: 'duration', width: 100 },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 130 },
   { title: '上传时间', dataIndex: 'createTime', key: 'createTime', width: 170 },
-  { title: '操作', key: 'actions', width: 200, align: 'right' }
+  { title: '操作', key: 'actions', width: 230, align: 'right' }
 ]
 
 function formatFileSize(bytes) {
@@ -270,6 +330,35 @@ function getStatusIcon(status) {
   }
 }
 
+function getProcessingTagColor(status) {
+  switch (status) {
+    case 'READY':
+      return 'success'
+    case 'PROCESSING':
+    case 'UPLOADED':
+      return 'processing'
+    case 'FAILED':
+      return 'error'
+    default:
+      return 'default'
+  }
+}
+
+function getProcessingTagLabel(status) {
+  switch (status) {
+    case 'READY':
+      return '可回放'
+    case 'PROCESSING':
+      return '切片转码中'
+    case 'UPLOADED':
+      return '排队中'
+    case 'FAILED':
+      return '转码失败'
+    default:
+      return status || '就绪'
+  }
+}
+
 // 获取录音列表
 async function fetchRecordings() {
   if (!props.meetingId) return
@@ -286,11 +375,14 @@ async function fetchRecordings() {
 
 // 上传校验
 function beforeUpload(file) {
-  const allowed = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/ogg', 'audio/x-m4a']
+  const allowed = [
+    'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/ogg', 'audio/x-m4a',
+    'video/mp4', 'video/x-matroska', 'video/quicktime', 'video/webm', 'video/x-msvideo'
+  ]
   const ext = file.name.split('.').pop().toLowerCase()
-  const validExts = ['mp3', 'wav', 'm4a', 'aac', 'webm', 'ogg']
+  const validExts = ['mp3', 'wav', 'm4a', 'aac', 'webm', 'ogg', 'mp4', 'mkv', 'mov', 'avi']
   if (!validExts.includes(ext) && !allowed.includes(file.type)) {
-    message.error('只支持上传 mp3, wav, m4a, aac, webm, ogg 格式的音频')
+    message.error('支持上传 mp3, wav, m4a, aac 音频及 mp4, mkv, mov 视频格式')
     return false
   }
   return true
@@ -300,32 +392,50 @@ function beforeUpload(file) {
 async function handleCustomUpload({ file }) {
   uploading.value = true
   uploadPercent.value = 10
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|mkv|mov|webm|avi)$/i.test(file.name)
+
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('meetingId', props.meetingId)
-
-    // 尝试读取时长
-    const audioObj = new Audio(URL.createObjectURL(file))
-    audioObj.onloadedmetadata = () => {
-      if (audioObj.duration && !isNaN(audioObj.duration)) {
-        formData.append('durationSeconds', Math.round(audioObj.duration))
-      }
+    if (isVideo) {
+      await uploadVideoRecording(props.meetingId, file, 0, (percent) => {
+        uploadPercent.value = percent
+      })
+      message.success('录像上传成功，已自动提交切片转码与 AI 回放分析！')
+    } else {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('meetingId', props.meetingId)
+      uploadPercent.value = 50
+      await uploadRecording(formData)
+      uploadPercent.value = 100
+      message.success('录音文件上传成功！请点击“发起转写”进行语音识别')
     }
-
-    uploadPercent.value = 40
-    const res = await uploadRecording(formData)
-    uploadPercent.value = 100
-
-    message.success('录音文件上传成功！请点击“发起转写”进行语音识别')
-    fetchRecordings()
+    await fetchRecordings()
+    await aiStore.loadRecordings(props.meetingId)
   } catch (err) {
-    message.error(err.message || '录音文件上传失败')
+    message.error(err.message || '录音/录像上传失败')
   } finally {
     setTimeout(() => {
       uploading.value = false
       uploadPercent.value = 0
-    }, 600)
+    }, 400)
+  }
+}
+
+function goToReplay(record) {
+  if (record?.recordingId) {
+    replayStore.selectRecording(record.recordingId)
+  }
+  router.push(`/meeting/replay/${props.meetingId}`)
+}
+
+async function handleDeleteRecording(record) {
+  try {
+    await deleteRecording(record.recordingId)
+    message.success('录像文件已删除，历史议题与纪要资产已保留')
+    await fetchRecordings()
+    await aiStore.loadRecordings(props.meetingId)
+  } catch (err) {
+    message.error('删除失败: ' + err.message)
   }
 }
 
@@ -379,11 +489,16 @@ function pollRecordingStatus(recordingId) {
 function playRecording(record) {
   activeRecording.value = record
   activeAudioUrl.value = getRecordingPlayUrl(record.recordingId)
+  if (record.durationSeconds) {
+    audioDurationMs.value = record.durationSeconds * 1000
+  }
+  replayStore.selectRecording(record.recordingId)
 }
 
 function closeAudioPlayer() {
   activeAudioUrl.value = ''
   activeRecording.value = null
+  audioCurrentTimeMs.value = 0
 }
 
 function viewTranscript(record) {
@@ -393,15 +508,25 @@ function viewTranscript(record) {
 
 function handleAudioTimeUpdate(e) {
   const currentSec = e.target.currentTime
-  aiStore.audioSeekTimeMs = Math.round(currentSec * 1000)
+  audioCurrentTimeMs.value = Math.round(currentSec * 1000)
+  aiStore.audioSeekTimeMs = audioCurrentTimeMs.value
+  replayStore.updateCurrentTime(audioCurrentTimeMs.value)
+}
+
+function handleAudioLoadedMetadata(e) {
+  if (e.target.duration && !isNaN(e.target.duration) && e.target.duration !== Infinity) {
+    audioDurationMs.value = Math.round(e.target.duration * 1000)
+  }
 }
 
 // 暴露音频 seek 给外部调用
 function seekAudioTime(ms) {
+  audioCurrentTimeMs.value = Math.round(ms)
   if (audioElementRef.value && ms !== undefined && ms !== null) {
     audioElementRef.value.currentTime = ms / 1000
     audioElementRef.value.play().catch(() => {})
   }
+  replayStore.updateCurrentTime(audioCurrentTimeMs.value)
 }
 
 defineExpose({
@@ -466,6 +591,19 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.player-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manager-scrubber-wrap {
+  background: #141b2d;
+  border-radius: 6px;
+  padding: 4px 12px;
+  margin-bottom: 8px;
 }
 
 .player-title {

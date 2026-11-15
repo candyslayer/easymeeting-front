@@ -16,6 +16,15 @@
       </div>
     </div>
 
+    <!-- 智能回放与时间轴联动快捷通道 -->
+    <div class="replay-link-alert">
+      <VideoCameraOutlined style="color: #1677ff; font-size: 16px" />
+      <span class="alert-desc">本场会议已支持 <strong>AI 视频智能回放</strong> 与议题时间轴联动，可查看录像各阶段讨论、决策与证据。</span>
+      <a-button type="primary" size="small" @click="goToReplay">
+        <VideoCameraOutlined /> 前往智能回放
+      </a-button>
+    </div>
+
     <div class="panel-body">
       <a-spin :spinning="loading">
         <div v-if="agendaTopics.length === 0" class="empty-state">
@@ -78,10 +87,12 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ReloadOutlined,
   RobotOutlined,
-  SearchOutlined
+  SearchOutlined,
+  VideoCameraOutlined
 } from '@ant-design/icons-vue'
 import { useMeetingAiStore } from '@/stores/meetingAi'
 
@@ -92,6 +103,7 @@ const props = defineProps({
   }
 })
 
+const router = useRouter()
 const aiStore = useMeetingAiStore()
 
 const loading = computed(() => aiStore.minutesLoading)
@@ -108,9 +120,28 @@ function handleReanalyze() {
 function handleJumpToSegment(segId) {
   aiStore.jumpToSegment(segId)
 }
+
+function goToReplay() {
+  router.push(`/meeting/replay/${props.meetingId}`)
+}
 </script>
 
 <style scoped>
+.replay-link-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #e6f4ff;
+  border-bottom: 1px solid #bae0ff;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #1f1f1f;
+}
+
+.alert-desc {
+  flex: 1;
+}
+
 .topics-panel {
   display: flex;
   flex-direction: column;

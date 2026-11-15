@@ -46,6 +46,47 @@ export function formatDuration(totalSeconds) {
 }
 
 /**
+ * 格式化毫秒为分秒或时分秒 (00:00 或 00:00:00)
+ * @param {number} ms 毫秒数
+ * @returns {string}
+ */
+export function formatMs(ms) {
+  if (ms == null || isNaN(ms) || ms < 0) ms = 0
+  const totalSeconds = Math.floor(ms / 1000)
+  return formatDuration(totalSeconds)
+}
+
+/**
+ * 格式化毫秒为可编辑时间字符串 (mm:ss 或 hh:mm:ss)
+ * @param {number} ms 毫秒数
+ * @returns {string}
+ */
+export function formatMsToTimeInput(ms) {
+  return formatMs(ms)
+}
+
+/**
+ * 将时间字符串 (mm:ss 或 hh:mm:ss) 解析为毫秒数
+ * @param {string} timeStr 时间字符串
+ * @returns {number}
+ */
+export function parseTimeToMs(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 0
+  const parts = timeStr.trim().split(':').map((p) => parseInt(p, 10) || 0)
+  if (parts.length === 3) {
+    // hh:mm:ss
+    return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+  } else if (parts.length === 2) {
+    // mm:ss
+    return (parts[0] * 60 + parts[1]) * 1000
+  } else if (parts.length === 1) {
+    // ss
+    return parts[0] * 1000
+  }
+  return 0
+}
+
+/**
  * 格式化文件尺寸大小
  * @param {number} bytes 
  * @returns {string}

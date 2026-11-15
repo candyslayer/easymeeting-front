@@ -75,6 +75,12 @@ const routes = [
     meta: { title: '实时会议室 - EasyMeeting', fullscreen: true }
   },
   {
+    path: '/meeting/replay/:id',
+    name: 'MeetingReplay',
+    component: () => import('@/views/meeting/MeetingReplayView.vue'),
+    meta: { title: 'AI 会议智能回放放映厅 - EasyMeeting', fullscreen: true }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

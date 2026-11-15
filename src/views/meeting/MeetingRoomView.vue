@@ -294,6 +294,22 @@
                   @select="handleSelectStripMember(member)"
                 />
               </div>
+
+              <!-- 等分网格下方的时移进度条 -->
+              <div class="spotlight-timeshift-wrapper">
+                <LiveMeetingTimeShiftBar
+                  :duration-ms="meetingDurationMs"
+                  :current-time-ms="timeShiftCurrentMs"
+                  :is-rewound="isTimeShiftActive"
+                  :topics="aiStore.agendaTopics"
+                  :events="aiStore.decisions"
+                  :segments="realtimeSegments"
+                  :active-stream="spotlightStream"
+                  :spotlight-member="spotlightMember"
+                  @seek="handleTimeShiftSeek"
+                  @return-to-live="handleReturnToLive"
+                />
+              </div>
             </div>
 
             <!-- 默认画廊焦点布局：Primary Spotlight Stage + Bottom Attendees Strip -->
@@ -514,6 +530,29 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- 时移回看画面遮罩浮层 (回溯模式) -->
+                <div v-if="isTimeShiftActive" class="timeshift-replay-overlay">
+                  <div class="timeshift-top-banner">
+                    <div class="ts-banner-left">
+                      <span class="ts-rewind-icon">⏪</span>
+                      <span class="ts-rewind-title">正在回溯会中讨论:</span>
+                      <span class="ts-rewind-time mono">{{ formatMs(timeShiftCurrentMs) }}</span>
+                      <span class="ts-rewind-lag mono">
+                        (落后实时 -{{ formatMs(Math.max(0, meetingDurationMs - timeShiftCurrentMs)) }})
+                      </span>
+                    </div>
+                    <button type="button" class="ts-live-btn" @click="handleReturnToLive">
+                      <span class="ts-live-dot pulse"></span>
+                      <span>返回实时直播 (LIVE)</span>
+                    </button>
+                  </div>
+
+                  <div v-if="rewoundSubtitle" class="timeshift-subtitle-float">
+                    <span class="ts-speaker-tag">【{{ rewoundSubtitle.speakerName || '参会人' }}】</span>
+                    <span class="ts-subtitle-text">{{ rewoundSubtitle.content }}</span>
+                  </div>
+                </div>
               </div>
 
               <!-- 底部参会人视频画廊条（仅多人参会或屏幕共享主舞台时显示，避免单人重复自己） -->
@@ -531,6 +570,22 @@
                   :compact="true"
                   class="strip-tile"
                   @select="handleSelectStripMember(member)"
+                />
+              </div>
+
+              <!-- 视频下方：会议时移回溯进度条（支持拖拽回溯与短额回放播放） -->
+              <div class="spotlight-timeshift-wrapper">
+                <LiveMeetingTimeShiftBar
+                  :duration-ms="meetingDurationMs"
+                  :current-time-ms="timeShiftCurrentMs"
+                  :is-rewound="isTimeShiftActive"
+                  :topics="aiStore.agendaTopics"
+                  :events="aiStore.decisions"
+                  :segments="realtimeSegments"
+                  :active-stream="spotlightStream"
+                  :spotlight-member="spotlightMember"
+                  @seek="handleTimeShiftSeek"
+                  @return-to-live="handleReturnToLive"
                 />
               </div>
             </template>
@@ -851,6 +906,22 @@
                   <MeetingIcon name="settings" :size="16" />
                 </button>
               </div>
+            </div>
+
+            <!-- 演讲者视图底部的时移回溯进度条 -->
+            <div class="spotlight-timeshift-wrapper">
+              <LiveMeetingTimeShiftBar
+                :duration-ms="meetingDurationMs"
+                :current-time-ms="timeShiftCurrentMs"
+                :is-rewound="isTimeShiftActive"
+                :topics="aiStore.agendaTopics"
+                :events="aiStore.decisions"
+                :segments="realtimeSegments"
+                :active-stream="spotlightStream"
+                :spotlight-member="spotlightMember"
+                @seek="handleTimeShiftSeek"
+                @return-to-live="handleReturnToLive"
+              />
             </div>
           </section>
 
@@ -1334,7 +1405,7 @@ import {
   updateMemberMediaState,
   loadChatMessage
 } from '@/api/meeting'
-import { formatMeetingNo, formatDuration, copyText } from '@/utils/format'
+import { formatMeetingNo, formatDuration, copyText, formatMs } from '@/utils/format'
 import { formatTranscriptMs } from '@/utils/transcript'
 import MeetingIcon from '@/components/meeting/MeetingIcon.vue'
 import VideoTile from '@/components/meeting/VideoTile.vue'
@@ -1343,6 +1414,7 @@ import EasyCopilotPanel from '@/components/meeting/EasyCopilotPanel.vue'
 import SpeakerMinutesPanel from '@/components/meeting/SpeakerMinutesPanel.vue'
 import AiCollabPanel from '@/components/meeting/AiCollabPanel.vue'
 import MeetingToolbar from '@/components/meeting/MeetingToolbar.vue'
+import LiveMeetingTimeShiftBar from '@/components/meeting/LiveMeetingTimeShiftBar.vue'
 import ParticipantDrawer from '@/components/meeting/ParticipantDrawer.vue'
 import ChatDrawer from '@/components/meeting/ChatDrawer.vue'
 import MeetingAiWorkspaceModal from '@/components/meeting-ai/MeetingAiWorkspaceModal.vue'
@@ -1378,6 +1450,45 @@ const showSubtitles = ref(true)
 const isHandRaised = ref(false)
 const pinnedUserId = ref(null)
 const screenShareInSpotlight = ref(true)
+
+// 会议时移回溯与短额回放状态 (视频下方进度条回溯)
+const isTimeShiftActive = ref(false)
+const timeShiftCurrentMs = ref(0)
+
+const meetingDurationMs = computed(() => {
+  return (meetingStore.durationSeconds || 0) * 1000
+})
+
+function handleTimeShiftSeek(targetMs) {
+  isTimeShiftActive.value = true
+  timeShiftCurrentMs.value = targetMs
+}
+
+function handleReturnToLive() {
+  isTimeShiftActive.value = false
+  timeShiftCurrentMs.value = meetingDurationMs.value
+}
+
+const rewoundSubtitle = computed(() => {
+  if (!isTimeShiftActive.value) return null
+  const t = timeShiftCurrentMs.value
+  const found = realtimeSegments.value.find((s) => {
+    const start = s.startTimeMs || 0
+    const end = s.endTimeMs || (start + 5000)
+    return t >= start && t <= end
+  })
+  if (found) return found
+  let closest = null
+  let minDiff = 15000
+  realtimeSegments.value.forEach((s) => {
+    const diff = Math.abs((s.startTimeMs || 0) - t)
+    if (diff <= minDiff) {
+      minDiff = diff
+      closest = s
+    }
+  })
+  return closest
+})
 
 // 视口宽度响应式监听
 const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1440)
@@ -3159,6 +3270,125 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: #c1c6d7;
   padding-left: 22px;
+}
+
+/* 视频下方：时移回溯进度条包装 */
+.spotlight-timeshift-wrapper {
+  width: 100%;
+  flex-shrink: 0;
+  border-radius: 0 0 10px 10px;
+  overflow: hidden;
+  margin-top: 4px;
+  z-index: 15;
+}
+
+/* 正在回看会中讨论浮层 */
+.timeshift-replay-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.timeshift-top-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(13, 17, 23, 0.95);
+  border: 1px solid #ff4d4f;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  padding: 8px 14px;
+  pointer-events: auto;
+}
+
+.ts-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ts-rewind-icon {
+  font-size: 14px;
+}
+
+.ts-rewind-title {
+  color: #ff7875;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ts-rewind-time {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ts-rewind-lag {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.ts-live-btn {
+  background: #ff4d4f;
+  color: #ffffff;
+  border: none;
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 0 10px rgba(255, 77, 79, 0.6);
+  transition: all 0.2s;
+}
+
+.ts-live-btn:hover {
+  background: #ff7875;
+  transform: scale(1.05);
+}
+
+.ts-live-dot {
+  width: 6px;
+  height: 6px;
+  background: #ffffff;
+  border-radius: 50%;
+}
+
+.timeshift-subtitle-float {
+  align-self: center;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: #ffffff;
+  max-width: 80%;
+  pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ts-speaker-tag {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.ts-subtitle-text {
+  color: #f0f6fc;
 }
 
 /* 底部参会人视频画廊条 */

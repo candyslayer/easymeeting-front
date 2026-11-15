@@ -187,14 +187,23 @@
               >
                 进入
               </a-button>
-              <a-button
-                v-else
-                type="link"
-                size="small"
-                @click="handleRejoin(record)"
-              >
-                重新发起
-              </a-button>
+              <template v-else>
+                <a-button
+                  type="link"
+                  size="small"
+                  style="color: #ff5722"
+                  @click="router.push(`/meeting/replay/${record.meetingId}`)"
+                >
+                  智能回放
+                </a-button>
+                <a-button
+                  type="link"
+                  size="small"
+                  @click="handleRejoin(record)"
+                >
+                  重新发起
+                </a-button>
+              </template>
             </template>
           </template>
         </a-table>
