@@ -742,4 +742,139 @@ export function deleteVerifiedTermCache(params) {
 // ==========================================
 export * from './meetingReplay'
 
+// ==========================================
+// 11. 议题驱动的实时转写、阶段性总结与知识体系 (/topic - EasyMeeting V2)
+// ==========================================
+
+/**
+ * 查询指定会议的全部议题列表（含当前阶段总结与状态）
+ * @param {string} meetingId 会议ID
+ */
+export function getTopicList(meetingId) {
+  return http.get('/meetingAi/topic/list', {
+    params: { meetingId }
+  })
+}
+
+/**
+ * 手动创建新研讨议题
+ * @param {Object} data { meetingId, topicName, description, sortOrder }
+ */
+export function createTopic(data) {
+  return http.post('/meetingAi/topic/create', data)
+}
+
+/**
+ * 切换活跃议题状态 (如将某议题切为 DISCUSSING，自动暂停其它议题)
+ * @param {Object} data { meetingId, topicId, targetStatus }
+ */
+export function switchTopic(data) {
+  return http.post('/meetingAi/topic/switch', data)
+}
+
+/**
+ * 结项议题并固化最终阶段性结论
+ * @param {Object} data { topicId, interimConclusion }
+ */
+export function concludeTopic(data) {
+  return http.post('/meetingAi/topic/conclude', data)
+}
+
+/**
+ * 重新开放议题研讨
+ * @param {Object} data { topicId }
+ */
+export function reopenTopic(data) {
+  return http.post('/meetingAi/topic/reopen', data)
+}
+
+/**
+ * 查询议题全量深度详情（含总结、观点、结论、决议、术语）
+ * @param {string} topicId 议题ID
+ */
+export function getTopicDetail(topicId) {
+  return http.get('/meetingAi/topic/detail', {
+    params: { topicId }
+  })
+}
+
+/**
+ * 人工调整发言转写片段的议题归属并重算总结
+ * @param {Object} data { meetingId, targetTopicId, segmentIds }
+ */
+export function reassignTopicSegments(data) {
+  return http.post('/meetingAi/topic/segment/reassign', data)
+}
+
+/**
+ * 立即触发生成/刷新议题增量阶段性总结
+ * @param {Object} data { topicId, updateReason }
+ */
+export function generateTopicSummaryNow(data) {
+  return http.post('/meetingAi/topic/summary/generate-now', data)
+}
+
+/**
+ * 查询议题全部历史总结版本及版本差异
+ * @param {string} topicId 议题ID
+ */
+export function getTopicSummaryVersions(topicId) {
+  return http.get('/meetingAi/topic/summary/versions', {
+    params: { topicId }
+  })
+}
+
+/**
+ * 人工编辑更新议题阶段性总结
+ * @param {Object} data { topicId, summaryContent, overview, interimConclusion, openIssues, updateReason }
+ */
+export function updateTopicSummary(data) {
+  return http.post('/meetingAi/topic/summary/update', data)
+}
+
+/**
+ * 查询议题发言人观点列表
+ * @param {string} topicId 议题ID
+ */
+export function getTopicOpinions(topicId) {
+  return http.get('/meetingAi/topic/opinions', {
+    params: { topicId }
+  })
+}
+
+/**
+ * 新增或修改发言人观点
+ * @param {Object} data { opinionId, topicId, speakerId, speakerName, opinionContent, opinionType, evidenceSegmentIds, status }
+ */
+export function modifyTopicOpinion(data) {
+  return http.post('/meetingAi/topic/opinion/modify', data)
+}
+
+/**
+ * 查询议题阶段性认识/结论列表
+ * @param {string} topicId 议题ID
+ */
+export function getTopicConclusions(topicId) {
+  return http.get('/meetingAi/topic/conclusions', {
+    params: { topicId }
+  })
+}
+
+/**
+ * 人工确认或修订阶段性结论
+ * @param {Object} data { conclusionId, topicId, status, conclusionContent, conclusionType }
+ */
+export function confirmTopicConclusion(data) {
+  return http.post('/meetingAi/topic/conclusion/confirm', data)
+}
+
+/**
+ * 基于积累的议题知识体系一键合成最终会议纪要
+ * @param {string} meetingId 会议ID
+ */
+export function generateMinutesFromTopics(meetingId) {
+  return http.post('/meetingAi/topic/minutes/generate-from-topics', { meetingId })
+}
+
+
 

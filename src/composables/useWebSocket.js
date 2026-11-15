@@ -278,6 +278,30 @@ export function useWebSocket() {
           emit('term_detected', data.meesageContent || data)
           break
 
+        case 32: // TOPIC_CHANGED: 议题切换/更新通知
+          emit('topic_changed', data.meesageContent || data)
+          break
+
+        case 33: // TOPIC_SUMMARY_UPDATED: 议题阶段性总结更新
+          emit('topic_summary_updated', data.meesageContent || data)
+          break
+
+        case 34: // TOPIC_OPINIONS_UPDATED: 议题参会人观点更新
+          emit('topic_opinions_updated', data.meesageContent || data)
+          break
+
+        case 35: // TOPIC_CONCLUSION_UPDATED: 议题阶段性结论更新
+          emit('topic_conclusion_updated', data.meesageContent || data)
+          break
+
+        case 36: // TOPIC_STATUS_UPDATED: 议题状态变更
+          emit('topic_status_updated', data.meesageContent || data)
+          break
+
+        case 37: // TOPIC_TERMS_UPDATED: 议题专业术语更新
+          emit('topic_terms_updated', data.meesageContent || data)
+          break
+
         default:
           break
       }

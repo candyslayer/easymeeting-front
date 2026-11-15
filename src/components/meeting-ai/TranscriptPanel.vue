@@ -133,6 +133,9 @@
                       <span class="speaker-name">{{ item.speakerName || '参会者' }}</span>
                     </button>
                     <span v-if="isSelfSpeaker(item)" class="role-badge self-badge">我</span>
+                    <a-tag v-if="item.topicId && getTopicName(item.topicId)" color="blue" size="small" class="segment-topic-tag">
+                      {{ getTopicName(item.topicId) }}
+                    </a-tag>
                     <span v-if="item.segmentId === highlightSegmentId" class="status-pill evidence-pill">
                       证据定位
                     </span>
@@ -343,6 +346,12 @@ const filteredSpeaker = ref('')
 const searchKeyword = ref('')
 const segmentsListRef = ref(null)
 const focusedSegmentId = ref(null)
+
+function getTopicName(topicId) {
+  if (!topicId) return ''
+  const t = (aiStore.topicsV2 || []).find((item) => item.topicId === topicId)
+  return t ? t.topicName : ''
+}
 
 // 视口宽度监听（适配移动端）
 const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)

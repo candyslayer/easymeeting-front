@@ -34,6 +34,11 @@ export function useRealtimeCopilot({ meetingId, localStream, remoteStreams, onWs
   let unbindWsDecision = null
   let unbindWsMinutes = null
   let unbindWsTerms = null
+  let unbindWsTopicChanged = null
+  let unbindWsTopicSummary = null
+  let unbindWsTopicOpinions = null
+  let unbindWsTopicConclusion = null
+  let unbindWsTopicStatus = null
 
   function connectStreamToMixer(stream, audioCtx, destination) {
     if (!stream || !audioCtx || !destination) return
@@ -327,6 +332,41 @@ export function useRealtimeCopilot({ meetingId, localStream, remoteStreams, onWs
       }
     })
 
+    unbindWsTopicChanged = onWs(32, (data) => {
+      const payload = data?.meesageContent || data
+      if (payload) {
+        aiStore.handleTopicChangedEvent(payload)
+      }
+    })
+
+    unbindWsTopicSummary = onWs(33, (data) => {
+      const payload = data?.meesageContent || data
+      if (payload) {
+        aiStore.handleTopicSummaryUpdatedEvent(payload)
+      }
+    })
+
+    unbindWsTopicOpinions = onWs(34, (data) => {
+      const payload = data?.meesageContent || data
+      if (payload) {
+        aiStore.handleTopicOpinionsUpdatedEvent(payload)
+      }
+    })
+
+    unbindWsTopicConclusion = onWs(35, (data) => {
+      const payload = data?.meesageContent || data
+      if (payload) {
+        aiStore.handleTopicConclusionUpdatedEvent(payload)
+      }
+    })
+
+    unbindWsTopicStatus = onWs(36, (data) => {
+      const payload = data?.meesageContent || data
+      if (payload) {
+        aiStore.handleTopicStatusUpdatedEvent(payload)
+      }
+    })
+
     unbindWsMinutes = onWs(22, async (data) => {
       const targetId = meetingId.value || data?.meetingId || data?.meesageContent?.meetingId
       if (targetId) {
@@ -344,10 +384,20 @@ export function useRealtimeCopilot({ meetingId, localStream, remoteStreams, onWs
     if (typeof unbindWsDecision === 'function') unbindWsDecision()
     if (typeof unbindWsMinutes === 'function') unbindWsMinutes()
     if (typeof unbindWsTerms === 'function') unbindWsTerms()
+    if (typeof unbindWsTopicChanged === 'function') unbindWsTopicChanged()
+    if (typeof unbindWsTopicSummary === 'function') unbindWsTopicSummary()
+    if (typeof unbindWsTopicOpinions === 'function') unbindWsTopicOpinions()
+    if (typeof unbindWsTopicConclusion === 'function') unbindWsTopicConclusion()
+    if (typeof unbindWsTopicStatus === 'function') unbindWsTopicStatus()
     unbindWsTranscript = null
     unbindWsDecision = null
     unbindWsMinutes = null
     unbindWsTerms = null
+    unbindWsTopicChanged = null
+    unbindWsTopicSummary = null
+    unbindWsTopicOpinions = null
+    unbindWsTopicConclusion = null
+    unbindWsTopicStatus = null
   }
 
   watch(

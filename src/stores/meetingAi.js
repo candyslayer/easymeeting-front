@@ -24,7 +24,22 @@ import {
   analyzeMeetingTermsSync,
   analyzeMeetingTermsAsync,
   correctMeetingTerm,
-  updateMeetingTermConfig
+  updateMeetingTermConfig,
+  getTopicList,
+  createTopic,
+  switchTopic,
+  concludeTopic,
+  reopenTopic,
+  getTopicDetail,
+  reassignTopicSegments,
+  generateTopicSummaryNow,
+  getTopicSummaryVersions,
+  updateTopicSummary,
+  getTopicOpinions,
+  modifyTopicOpinion,
+  getTopicConclusions,
+  confirmTopicConclusion,
+  generateMinutesFromTopics
 } from '@/api/meetingAi'
 
 export const useMeetingAiStore = defineStore('meetingAi', {
@@ -75,6 +90,15 @@ export const useMeetingAiStore = defineStore('meetingAi', {
     minutes: null,
     minutesLoading: false,
     agendaTopics: [],
+
+    // 议题驱动知识体系 (EasyMeeting V2)
+    topicsV2: [],
+    topicsV2Loading: false,
+    currentTopicId: null,
+    currentTopicDetail: null,
+    topicDetailLoading: false,
+    topicSummaryVersions: [],
+    topicVersionsLoading: false,
 
     // 决策与待办
     decisions: [],
@@ -535,7 +559,8 @@ export const useMeetingAiStore = defineStore('meetingAi', {
         this.loadMinutes(mid),
         this.loadDecisions(mid),
         this.loadActionItems(mid),
-        this.loadMeetingTerms(mid)
+        this.loadMeetingTerms(mid),
+        this.loadTopicsV2(mid)
       ])
     },
 
@@ -919,6 +944,276 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       this.taskPollingTimer = setInterval(poll, 1200)
     },
 
+    // ==========================================
+    // 议题驱动知识体系 Actions (EasyMeeting V2)
+    // ==========================================
+
+    async loadTopicsV2(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return []
+      if (this.currentMeetingId !== mid) this.currentMeetingId = mid
+      this.topicsV2Loading = true
+      try {
+        const list = await getTopicList(mid)
+        this.topicsV2 = list || []
+        // 若尚未选中任何议题，默认选中第一个讨论中或首个议题
+        if (!this.currentTopicId && this.topicsV2.length > 0) {
+          const discussing = this.topicsV2.find((t) => t.status === 'DISCUSSING' || t.status === 'REOPENED')
+          const target = discussing || this.topicsV2[0]
+          this.selectTopic(target.topicId)
+        } else if (this.currentTopicId) {
+          // 刷新当前选中的议题详情
+          this.loadTopicDetail(this.currentTopicId)
+        }
+        return this.topicsV2
+      } catch (err) {
+        console.error('获取议题列表失败', err)
+        return []
+      } finally {
+        this.topicsV2Loading = false
+      }
+    },
+
+    async selectTopic(topicId) {
+      if (!topicId) return
+      this.currentTopicId = topicId
+      await this.loadTopicDetail(topicId)
+    },
+
+    async loadTopicDetail(topicId = this.currentTopicId) {
+      const tid = topicId || this.currentTopicId
+      if (!tid) return null
+      this.topicDetailLoading = true
+      try {
+        const detail = await getTopicDetail(tid)
+        this.currentTopicDetail = detail
+        return detail
+      } catch (err) {
+        console.error('获取议题详情失败', err)
+        return null
+      } finally {
+        this.topicDetailLoading = false
+      }
+    },
+
+    async createTopicAction(data) {
+      try {
+        const topic = await createTopic(data)
+        message.success(`议题【${data.topicName}】创建成功`)
+        await this.loadTopicsV2(this.currentMeetingId)
+        if (topic && topic.topicId) {
+          this.selectTopic(topic.topicId)
+        }
+        return topic
+      } catch (err) {
+        message.error(err.message || '创建议题失败')
+        throw err
+      }
+    },
+
+    async switchTopicAction(topicId, targetStatus = 'DISCUSSING') {
+      try {
+        const topic = await switchTopic({
+          meetingId: this.currentMeetingId,
+          topicId,
+          targetStatus
+        })
+        message.success(`议题状态已切换为 ${targetStatus}`)
+        await this.loadTopicsV2(this.currentMeetingId)
+        this.selectTopic(topicId)
+        return topic
+      } catch (err) {
+        message.error(err.message || '切换议题失败')
+        throw err
+      }
+    },
+
+    async concludeTopicAction(topicId, interimConclusion) {
+      try {
+        const topic = await concludeTopic({
+          topicId,
+          interimConclusion
+        })
+        message.success('议题已结项并生成阶段性最终结论')
+        await this.loadTopicsV2(this.currentMeetingId)
+        this.loadTopicDetail(topicId)
+        return topic
+      } catch (err) {
+        message.error(err.message || '结项失败')
+        throw err
+      }
+    },
+
+    async reopenTopicAction(topicId) {
+      try {
+        const topic = await reopenTopic({ topicId })
+        message.success('议题已重新开放研讨')
+        await this.loadTopicsV2(this.currentMeetingId)
+        this.loadTopicDetail(topicId)
+        return topic
+      } catch (err) {
+        message.error(err.message || '重新开放议题失败')
+        throw err
+      }
+    },
+
+    async reassignSegmentsAction(targetTopicId, segmentIds) {
+      try {
+        await reassignTopicSegments({
+          meetingId: this.currentMeetingId,
+          targetTopicId,
+          segmentIds
+        })
+        message.success('发言片段已重归类至新议题')
+        await Promise.allSettled([
+          this.loadTranscriptSegments(this.currentMeetingId, this.transcriptPageNo, this.transcriptPageSize),
+          this.loadTopicsV2(this.currentMeetingId),
+          this.loadTopicDetail(targetTopicId)
+        ])
+      } catch (err) {
+        message.error(err.message || '重归类失败')
+        throw err
+      }
+    },
+
+    async generateTopicSummaryNowAction(topicId = this.currentTopicId, updateReason = '人工触发即时更新') {
+      const tid = topicId || this.currentTopicId
+      if (!tid) return null
+      this.topicDetailLoading = true
+      try {
+        const summary = await generateTopicSummaryNow({
+          topicId: tid,
+          updateReason
+        })
+        message.success(`已生成阶段性总结 V${summary.versionNumber}`)
+        await this.loadTopicDetail(tid)
+        await this.loadTopicsV2(this.currentMeetingId)
+        return summary
+      } catch (err) {
+        message.error(err.message || '生成阶段性总结失败')
+        throw err
+      } finally {
+        this.topicDetailLoading = false
+      }
+    },
+
+    async loadTopicSummaryVersions(topicId = this.currentTopicId) {
+      const tid = topicId || this.currentTopicId
+      if (!tid) return []
+      this.topicVersionsLoading = true
+      try {
+        const versions = await getTopicSummaryVersions(tid)
+        this.topicSummaryVersions = versions || []
+        return this.topicSummaryVersions
+      } catch (err) {
+        console.error('获取总结版本历史失败', err)
+        return []
+      } finally {
+        this.topicVersionsLoading = false
+      }
+    },
+
+    async updateTopicSummaryAction(data) {
+      try {
+        const summary = await updateTopicSummary(data)
+        message.success('议题阶段性总结已人工更新')
+        await this.loadTopicDetail(data.topicId)
+        await this.loadTopicsV2(this.currentMeetingId)
+        return summary
+      } catch (err) {
+        message.error(err.message || '更新总结失败')
+        throw err
+      }
+    },
+
+    async modifyTopicOpinionAction(data) {
+      try {
+        const op = await modifyTopicOpinion(data)
+        message.success('发言人观点已保存')
+        await this.loadTopicDetail(data.topicId)
+        return op
+      } catch (err) {
+        message.error(err.message || '保存观点失败')
+        throw err
+      }
+    },
+
+    async confirmTopicConclusionAction(data) {
+      try {
+        const con = await confirmTopicConclusion(data)
+        message.success('阶段性结论已确认')
+        await this.loadTopicDetail(data.topicId)
+        await this.loadTopicsV2(this.currentMeetingId)
+        return con
+      } catch (err) {
+        message.error(err.message || '确认结论失败')
+        throw err
+      }
+    },
+
+    async generateMinutesFromTopicsAction(meetingId = this.currentMeetingId) {
+      const mid = meetingId || this.currentMeetingId
+      if (!mid) return
+      try {
+        await generateMinutesFromTopics(mid)
+        message.success('已基于累积议题知识成功合成最终会议纪要')
+        await this.loadMinutes(mid)
+      } catch (err) {
+        message.error(err.message || '合成会议纪要失败')
+        throw err
+      }
+    },
+
+    // WebSocket 实时推送响应事件
+    handleTopicChangedEvent(payload) {
+      if (!payload) return
+      this.loadTopicsV2(this.currentMeetingId)
+      if (this.currentTopicId && payload.topicId === this.currentTopicId) {
+        this.loadTopicDetail(this.currentTopicId)
+      }
+      notification.info({
+        message: '议题演进通知',
+        description: `当前研讨议题：【${payload.topicName || payload.title}】(${payload.status})`,
+        duration: 3
+      })
+    },
+
+    handleTopicSummaryUpdatedEvent(payload) {
+      if (!payload) return
+      if (this.currentTopicId && payload.topicId === this.currentTopicId) {
+        this.loadTopicDetail(this.currentTopicId)
+      }
+      this.loadTopicsV2(this.currentMeetingId)
+      notification.success({
+        message: '议题阶段性总结更新',
+        description: `议题阶段性总结已演进至 V${payload.versionNumber || ''}`,
+        duration: 3
+      })
+    },
+
+    handleTopicOpinionsUpdatedEvent(payload) {
+      if (!payload) return
+      if (this.currentTopicId) {
+        this.loadTopicDetail(this.currentTopicId)
+      }
+    },
+
+    handleTopicConclusionUpdatedEvent(payload) {
+      if (!payload) return
+      if (this.currentTopicId) {
+        this.loadTopicDetail(this.currentTopicId)
+      }
+      this.loadTopicsV2(this.currentMeetingId)
+    },
+
+    handleTopicStatusUpdatedEvent(payload) {
+      if (!payload) return
+      this.loadTopicsV2(this.currentMeetingId)
+      if (this.currentTopicId && payload.topicId === this.currentTopicId) {
+        this.loadTopicDetail(this.currentTopicId)
+      }
+    },
+
     /**
      * 停止轮询
      */
@@ -967,6 +1262,10 @@ export const useMeetingAiStore = defineStore('meetingAi', {
       this.minutes = null
       this.minutesLoading = false
       this.agendaTopics = []
+      this.topicsV2 = []
+      this.currentTopicId = null
+      this.currentTopicDetail = null
+      this.topicSummaryVersions = []
       this.decisions = []
       this.decisionsLoading = false
       this.activeDecisionId = null

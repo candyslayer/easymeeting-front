@@ -93,6 +93,27 @@
       <main class="workspace-main">
         <!-- 1. 会议概览 -->
         <div v-show="currentTab === 'overview'" class="tab-container overview-tab">
+          <!-- 议题驱动一体化研讨工作台 V2 快捷入口 -->
+          <div class="replay-quick-banner topic-v2-banner" @click="switchTab('topicWorkspace')">
+            <div class="banner-left">
+              <div class="banner-icon-box" style="background: #2563eb; color: #fff">
+                <OrderedListOutlined />
+              </div>
+              <div class="banner-text">
+                <div class="banner-title">
+                  议题驱动知识研讨工作台 (EasyMeeting V2)
+                  <a-tag color="blue" style="margin-left: 8px">● 核心全新架构</a-tag>
+                </div>
+                <div class="banner-desc">
+                  一体化三栏研讨空间：议题导航管理 + 实时转写流实体高亮(FPY/CT/WIP) + 阶段性总结演进/人员观点/阶段结论/决议追溯。
+                </div>
+              </div>
+            </div>
+            <a-button type="primary" class="banner-enter-btn" @click.stop="switchTab('topicWorkspace')">
+              进入议题工作台 <RightOutlined />
+            </a-button>
+          </div>
+
           <!-- 智能回放与高能拖动条回溯快捷通道 -->
           <div class="replay-quick-banner" @click="goToReplayTheater">
             <div class="banner-left">
@@ -209,6 +230,14 @@
           </div>
         </div>
 
+        <!-- 0. 议题工作台 (EasyMeeting V2 核心三栏一体化工作空间) -->
+        <div v-show="currentTab === 'topicWorkspace'" class="tab-container topic-workspace-tab">
+          <TopicWorkspacePanel
+            :meeting-id="meetingId"
+            @seek-audio="handleSeekAudio"
+          />
+        </div>
+
         <!-- 智能回放与议题时间轴 -->
         <div v-show="currentTab === 'replay'" class="tab-container replay-tab-container">
           <div class="theater-redirect-bar">
@@ -309,6 +338,7 @@ import { formatMeetingNo, formatDateTime } from '@/utils/format'
 import { loadMeetingHistory } from '@/api/meeting'
 
 // 子面板组件
+import TopicWorkspacePanel from '@/components/meeting-ai/TopicWorkspacePanel.vue'
 import ReplayWorkspace from '@/components/meeting-ai/ReplayWorkspace.vue'
 import TranscriptPanel from '@/components/meeting-ai/TranscriptPanel.vue'
 import RecordingManager from '@/components/meeting-ai/RecordingManager.vue'
@@ -339,6 +369,7 @@ const currentTab = computed({
 
 const navTabs = computed(() => [
   { key: 'overview', label: '会议概览', icon: AppstoreOutlined },
+  { key: 'topicWorkspace', label: '议题工作台', icon: OrderedListOutlined, badge: aiStore.topicsV2.length },
   { key: 'replay', label: '智能回放', icon: VideoCameraOutlined },
   { key: 'transcript', label: '转写记录', icon: FileTextOutlined, badge: aiStore.transcriptTotal },
   { key: 'recording', label: '录音管理', icon: AudioOutlined, badge: aiStore.recordings.length },
@@ -629,6 +660,17 @@ onUnmounted(() => {
   flex: 1;
   height: 100%;
   overflow: hidden;
+}
+
+.tab-container.topic-workspace-tab {
+  margin: -16px;
+  height: calc(100% + 32px);
+}
+
+.topic-v2-banner {
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #93c5fd;
 }
 
 .overview-tab {
