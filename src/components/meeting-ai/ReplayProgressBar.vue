@@ -10,7 +10,7 @@
   >
     <!-- 时间轴底轨 -->
     <div class="progress-track">
-      <!-- 议题色块分布层 -->
+      <!-- 议题色块分布层 (每个议题使用专属主题色与内部已播放高亮进度) -->
       <div
         v-for="(topic, idx) in normalizedTopics"
         :key="topic.id || idx"
@@ -19,18 +19,32 @@
         :style="{
           left: `${topic.leftPercent}%`,
           width: `${topic.widthPercent}%`,
-          backgroundColor: getTopicColor(idx)
+          backgroundColor: topic.palette?.bgUnplayed || getTopicPalette(idx).bgUnplayed,
+          borderRight: `2px solid rgba(255, 255, 255, 0.45)`
         }"
         :title="`议题 ${topic.sortOrder || idx + 1}: ${topic.title} (${formatMs(topic.startTimeMs)} - ${formatMs(topic.endTimeMs)})`"
       >
+        <!-- 内部已播放高亮条 -->
+        <div
+          v-if="getTopicPlayedPercent(topic) > 0"
+          class="topic-segment-played"
+          :style="{
+            width: `${getTopicPlayedPercent(topic)}%`,
+            background: topic.palette?.bg || getTopicPalette(idx).bg
+          }"
+        ></div>
+
         <span v-if="topic.widthPercent > 5" class="topic-label ellipsis">
+          <span class="topic-label-badge" :style="{ backgroundColor: topic.palette?.badgeBg || getTopicPalette(idx).badgeBg }">
+            #{{ topic.sortOrder || idx + 1 }}
+          </span>
           {{ topic.title }}
         </span>
       </div>
 
-      <!-- 播放/拖动进度高亮条 -->
+      <!-- 底部细微高光指示线 (不遮挡各议题主题色) -->
       <div
-        class="progress-fill"
+        class="progress-fill-line"
         :style="{ width: `${displayPercent}%` }"
       ></div>
 
@@ -228,18 +242,101 @@ const displayPercent = computed(() => {
   return naturalPercent.value
 })
 
+// 8 套高辨识度专属议题主题色彩体系
+const TOPIC_PALETTES = [
+  {
+    name: 'tech-blue',
+    color: '#1677ff',
+    bg: 'linear-gradient(180deg, #1677ff 0%, #0958d9 100%)',
+    bgUnplayed: 'rgba(22, 119, 255, 0.32)',
+    border: '#69b1ff',
+    badgeBg: '#1677ff'
+  },
+  {
+    name: 'emerald-green',
+    color: '#52c41a',
+    bg: 'linear-gradient(180deg, #52c41a 0%, #237804 100%)',
+    bgUnplayed: 'rgba(82, 196, 26, 0.32)',
+    border: '#95de64',
+    badgeBg: '#52c41a'
+  },
+  {
+    name: 'amber-orange',
+    color: '#fa8c16',
+    bg: 'linear-gradient(180deg, #fa8c16 0%, #ad4e00 100%)',
+    bgUnplayed: 'rgba(250, 140, 22, 0.32)',
+    border: '#ffc069',
+    badgeBg: '#fa8c16'
+  },
+  {
+    name: 'royal-purple',
+    color: '#722ed1',
+    bg: 'linear-gradient(180deg, #722ed1 0%, #391085 100%)',
+    bgUnplayed: 'rgba(114, 46, 209, 0.32)',
+    border: '#b37feb',
+    badgeBg: '#722ed1'
+  },
+  {
+    name: 'luminous-cyan',
+    color: '#13c2c2',
+    bg: 'linear-gradient(180deg, #13c2c2 0%, #006d75 100%)',
+    bgUnplayed: 'rgba(19, 194, 194, 0.32)',
+    border: '#5cdbd3',
+    badgeBg: '#13c2c2'
+  },
+  {
+    name: 'rose-magenta',
+    color: '#eb2f96',
+    bg: 'linear-gradient(180deg, #eb2f96 0%, #9e105c 100%)',
+    bgUnplayed: 'rgba(235, 47, 150, 0.32)',
+    border: '#ff85c0',
+    badgeBg: '#eb2f96'
+  },
+  {
+    name: 'solar-gold',
+    color: '#faad14',
+    bg: 'linear-gradient(180deg, #faad14 0%, #ad6800 100%)',
+    bgUnplayed: 'rgba(250, 173, 20, 0.32)',
+    border: '#ffd666',
+    badgeBg: '#faad14'
+  },
+  {
+    name: 'coral-red',
+    color: '#ff4d4f',
+    bg: 'linear-gradient(180deg, #ff4d4f 0%, #a8071a 100%)',
+    bgUnplayed: 'rgba(255, 77, 79, 0.32)',
+    border: '#ff7875',
+    badgeBg: '#ff4d4f'
+  }
+]
+
+function getTopicPalette(index) {
+  return TOPIC_PALETTES[index % TOPIC_PALETTES.length]
+}
+
+function getTopicPlayedPercent(topic) {
+  const cur = props.currentTimeMs || 0
+  if (cur <= topic.startTimeMs) return 0
+  if (cur >= topic.endTimeMs) return 100
+  const dur = topic.endTimeMs - topic.startTimeMs
+  if (dur <= 0) return 100
+  return Math.min(100, Math.max(0, ((cur - topic.startTimeMs) / dur) * 100))
+}
+
 // 议题色块分布
 const normalizedTopics = computed(() => {
   if (safeDurationMs.value <= 0) return []
-  return props.topics.map((t) => {
+  return props.topics.map((t, idx) => {
     const start = Math.max(0, t.startTimeMs || 0)
     const end = Math.min(safeDurationMs.value, t.endTimeMs || safeDurationMs.value)
     const leftPercent = (start / safeDurationMs.value) * 100
     const widthPercent = Math.max(0.6, ((end - start) / safeDurationMs.value) * 100)
+    const palette = getTopicPalette(idx)
     return {
       ...t,
       leftPercent,
-      widthPercent
+      widthPercent,
+      palette
     }
   })
 })
@@ -467,7 +564,8 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   height: 100%;
-  border-right: 1.5px solid rgba(255, 255, 255, 0.5);
+  border-right: 2px solid rgba(255, 255, 255, 0.5);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -477,30 +575,54 @@ onUnmounted(() => {
 }
 
 .topic-segment.active {
-  box-shadow: 0 0 10px rgba(22, 119, 255, 0.9);
-  border-top: 1.5px solid #1677ff;
-  border-bottom: 1.5px solid #1677ff;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 0 10px rgba(255, 255, 255, 0.4);
 }
 
-.topic-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.95);
-  padding: 0 4px;
-  line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-/* 播放进度填色 */
-.progress-fill {
+.topic-segment-played {
   position: absolute;
   top: 0;
   left: 0;
   height: 100%;
-  background: linear-gradient(90deg, #1677ff, #4096ff);
-  border-radius: 7px;
   pointer-events: none;
-  opacity: 0.9;
+  transition: width 0.05s linear;
+}
+
+.topic-label {
+  position: relative;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  padding: 0 4px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topic-label-badge {
+  font-size: 9px;
+  color: #ffffff;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-weight: 700;
+  line-height: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* 播放进度指示线 (底线高光，不覆盖各议题独立颜色) */
+.progress-fill-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2.5px;
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 5;
 }
 
 /* 播放游标 Handle (支持拖拽) */

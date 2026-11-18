@@ -53,29 +53,43 @@
       @touchstart.passive="handleTouchStart"
     >
       <div class="track-bg">
-        <!-- 议题分段色块分布（标识议题与明确时间端） -->
+        <!-- 议题分段色块分布（每个议题拥有完全独立的色彩、高能时间端与微光分割线） -->
         <div
           v-for="(topic, idx) in normalizedTopics"
           :key="topic.id || idx"
           class="topic-chunk"
-          :class="{ 'is-active-chunk': isCurrentTopic(topic) }"
+          :class="{
+            'is-active-chunk': isCurrentTopic(topic),
+            'is-past-chunk': displayTimeMs >= topic.endTimeMs
+          }"
           :style="{
             left: `${topic.leftPercent}%`,
             width: `${topic.widthPercent}%`,
-            backgroundColor: getTopicColor(idx)
+            backgroundColor: topic.palette.bgUnplayed,
+            borderColor: topic.palette.border
           }"
           @click.stop="seekToMs(topic.startTimeMs)"
         >
+          <!-- 议题内部已播放进度高亮（使用该议题专属的饱满主题色渐变） -->
+          <div
+            v-if="getTopicPlayedPercent(topic) > 0"
+            class="topic-chunk-played"
+            :style="{
+              width: `${getTopicPlayedPercent(topic)}%`,
+              background: topic.palette.bg
+            }"
+          ></div>
+
           <a-tooltip placement="top" :mouse-enter-delay="0.15">
             <template #title>
               <div class="topic-tooltip-content">
                 <div class="topic-tt-header">
-                  <span class="topic-tt-badge" :style="{ backgroundColor: getTopicBadgeColor(idx) }">
+                  <span class="topic-tt-badge" :style="{ backgroundColor: topic.palette.badgeBg }">
                     议题 {{ idx + 1 }}
                   </span>
                   <span class="topic-tt-title font-bold">{{ topic.title }}</span>
                 </div>
-                <div class="topic-tt-timeband">
+                <div class="topic-tt-timeband" :style="{ color: topic.palette.border }">
                   <span class="tt-icon">⏱</span>
                   <span class="tt-range mono">{{ topic.timeBandStr }}</span>
                   <span class="tt-dur">(持续 {{ topic.durationStr }})</span>
@@ -90,7 +104,9 @@
             </template>
 
             <div class="chunk-inner">
-              <span class="chunk-index font-bold">#{{ idx + 1 }}</span>
+              <span class="chunk-badge" :style="{ backgroundColor: topic.palette.badgeBg }">
+                #{{ idx + 1 }}
+              </span>
               <span v-if="topic.widthPercent > 5" class="chunk-title ellipsis">
                 {{ topic.title }}
               </span>
@@ -102,11 +118,20 @@
           </a-tooltip>
         </div>
 
-        <!-- 播放/回溯已走过的进度条 -->
+        <!-- 底部发光行进底线 (细微高光，不遮盖各议题分段主题色) -->
         <div
-          class="track-fill"
-          :class="{ 'rewound-fill': isRewound }"
+          class="track-progress-underline"
           :style="{ width: `${displayPercent}%` }"
+        ></div>
+
+        <!-- 回溯落后指示条 (仅在时移回溯时在底部提示落后区间) -->
+        <div
+          v-if="isRewound"
+          class="rewind-lag-track"
+          :style="{
+            left: `${displayPercent}%`,
+            width: `${Math.max(0, 100 - displayPercent)}%`
+          }"
         ></div>
 
         <!-- 实时推流端点提示指示器 (最右侧实时红点) -->
@@ -189,9 +214,13 @@
             </div>
 
             <div v-if="hoverTopic" class="hover-topic-row ellipsis">
-              <span class="topic-tag-pill">议题</span>
+              <span class="topic-tag-pill" :style="{ backgroundColor: hoverTopic.palette?.badgeBg || '#1677ff' }">
+                议题 {{ hoverTopicIndex + 1 }}
+              </span>
               <span class="ellipsis topic-name-span">{{ hoverTopic.title }}</span>
-              <span class="topic-span-range mono">{{ hoverTopic.timeBandStr }}</span>
+              <span class="topic-span-range mono" :style="{ color: hoverTopic.palette?.border || '#8b949e' }">
+                {{ hoverTopic.timeBandStr }}
+              </span>
             </div>
 
             <div v-if="hoverEvent" class="hover-event-row ellipsis">
@@ -275,6 +304,11 @@ const props = defineProps({
   spotlightMember: {
     type: Object,
     default: null
+  },
+  // 共享的时移帧缓冲区
+  frameBuffer: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -370,12 +404,104 @@ function formatDurationStr(ms) {
   return `${seconds}秒`
 }
 
-// 归一化议题分段：保证明确标识时间端 [startTime - endTime] 与持续时长
+// 8 套高辨识度专属议题主题色彩体系 (高饱和度、高对比度、科技质感)
+const TOPIC_PALETTES = [
+  {
+    name: 'tech-blue',
+    color: '#1677ff',
+    bg: 'linear-gradient(180deg, #1677ff 0%, #0958d9 100%)',
+    bgUnplayed: 'rgba(22, 119, 255, 0.32)',
+    border: '#69b1ff',
+    badgeBg: '#1677ff'
+  },
+  {
+    name: 'emerald-green',
+    color: '#52c41a',
+    bg: 'linear-gradient(180deg, #52c41a 0%, #237804 100%)',
+    bgUnplayed: 'rgba(82, 196, 26, 0.32)',
+    border: '#95de64',
+    badgeBg: '#52c41a'
+  },
+  {
+    name: 'amber-orange',
+    color: '#fa8c16',
+    bg: 'linear-gradient(180deg, #fa8c16 0%, #ad4e00 100%)',
+    bgUnplayed: 'rgba(250, 140, 22, 0.32)',
+    border: '#ffc069',
+    badgeBg: '#fa8c16'
+  },
+  {
+    name: 'royal-purple',
+    color: '#722ed1',
+    bg: 'linear-gradient(180deg, #722ed1 0%, #391085 100%)',
+    bgUnplayed: 'rgba(114, 46, 209, 0.32)',
+    border: '#b37feb',
+    badgeBg: '#722ed1'
+  },
+  {
+    name: 'luminous-cyan',
+    color: '#13c2c2',
+    bg: 'linear-gradient(180deg, #13c2c2 0%, #006d75 100%)',
+    bgUnplayed: 'rgba(19, 194, 194, 0.32)',
+    border: '#5cdbd3',
+    badgeBg: '#13c2c2'
+  },
+  {
+    name: 'rose-magenta',
+    color: '#eb2f96',
+    bg: 'linear-gradient(180deg, #eb2f96 0%, #9e105c 100%)',
+    bgUnplayed: 'rgba(235, 47, 150, 0.32)',
+    border: '#ff85c0',
+    badgeBg: '#eb2f96'
+  },
+  {
+    name: 'solar-gold',
+    color: '#faad14',
+    bg: 'linear-gradient(180deg, #faad14 0%, #ad6800 100%)',
+    bgUnplayed: 'rgba(250, 173, 20, 0.32)',
+    border: '#ffd666',
+    badgeBg: '#faad14'
+  },
+  {
+    name: 'coral-red',
+    color: '#ff4d4f',
+    bg: 'linear-gradient(180deg, #ff4d4f 0%, #a8071a 100%)',
+    bgUnplayed: 'rgba(255, 77, 79, 0.32)',
+    border: '#ff7875',
+    badgeBg: '#ff4d4f'
+  }
+]
+
+function getTopicPalette(index) {
+  return TOPIC_PALETTES[index % TOPIC_PALETTES.length]
+}
+
+function getTopicColor(index) {
+  return getTopicPalette(index).color
+}
+
+function getTopicBadgeColor(index) {
+  return getTopicPalette(index).badgeBg
+}
+
+// 归一化议题分段：保证明确标识时间端 [startTime - endTime] 与持续时长，赋予专属色谱
 const normalizedTopics = computed(() => {
   const duration = safeDurationMs.value
-  if (duration <= 0 || !props.topics || props.topics.length === 0) return []
+  if (duration <= 0) return []
 
-  const rawList = [...props.topics]
+  let rawList = (props.topics && props.topics.length > 0) ? [...props.topics] : []
+  // 兜底若暂无议题，默认提供初始会议主线议题
+  if (rawList.length === 0) {
+    rawList = [
+      {
+        id: 'initial_live_topic',
+        title: '会中研讨主线',
+        startTimeMs: 0,
+        endTimeMs: duration
+      }
+    ]
+  }
+
   const count = rawList.length
 
   return rawList.map((t, idx) => {
@@ -383,7 +509,6 @@ const normalizedTopics = computed(() => {
     let start = t.startTimeMs
     let end = t.endTimeMs
 
-    // 如果未带毫秒时间戳，根据排序均分或推导
     if (start === undefined || start === null) {
       start = Math.round((idx / count) * duration)
     }
@@ -401,6 +526,7 @@ const normalizedTopics = computed(() => {
     const leftPercent = (start / duration) * 100
     const widthPercent = Math.max(2, ((end - start) / duration) * 100)
     const durMs = end - start
+    const palette = getTopicPalette(idx)
 
     return {
       ...t,
@@ -410,7 +536,8 @@ const normalizedTopics = computed(() => {
       leftPercent,
       widthPercent,
       timeBandStr: `[${formatMs(start)} - ${formatMs(end)}]`,
-      durationStr: formatDurationStr(durMs)
+      durationStr: formatDurationStr(durMs),
+      palette
     }
   })
 })
@@ -418,6 +545,15 @@ const normalizedTopics = computed(() => {
 function isCurrentTopic(topic) {
   const cur = displayTimeMs.value
   return cur >= topic.startTimeMs && cur <= topic.endTimeMs
+}
+
+function getTopicPlayedPercent(topic) {
+  const cur = displayTimeMs.value
+  if (cur <= topic.startTimeMs) return 0
+  if (cur >= topic.endTimeMs) return 100
+  const dur = topic.endTimeMs - topic.startTimeMs
+  if (dur <= 0) return 100
+  return Math.min(100, Math.max(0, ((cur - topic.startTimeMs) / dur) * 100))
 }
 
 // 归一化事件图钉
@@ -431,33 +567,6 @@ const normalizedEvents = computed(() => {
     }
   })
 })
-
-// 议题色板
-const topicColors = [
-  'rgba(22, 119, 255, 0.42)',
-  'rgba(19, 194, 194, 0.42)',
-  'rgba(82, 196, 26, 0.42)',
-  'rgba(250, 140, 22, 0.42)',
-  'rgba(114, 46, 209, 0.42)',
-  'rgba(235, 47, 150, 0.42)'
-]
-
-const topicBadgeColors = [
-  '#1677ff',
-  '#13c2c2',
-  '#52c41a',
-  '#fa8c16',
-  '#722ed1',
-  '#eb2f96'
-]
-
-function getTopicColor(index) {
-  return topicColors[index % topicColors.length]
-}
-
-function getTopicBadgeColor(index) {
-  return topicBadgeColors[index % topicBadgeColors.length]
-}
 
 function getEventTagColor(type) {
   switch (type) {
@@ -488,6 +597,11 @@ const hoverTopic = computed(() => {
   return normalizedTopics.value.find((item) => {
     return t >= item.startTimeMs && t <= item.endTimeMs
   }) || null
+})
+
+const hoverTopicIndex = computed(() => {
+  if (!hoverTopic.value || !normalizedTopics.value) return 0
+  return normalizedTopics.value.findIndex((t) => t === hoverTopic.value || t.id === hoverTopic.value.id)
 })
 
 // 悬停命中最近事件
@@ -567,12 +681,24 @@ watch(
   { immediate: true }
 )
 
-// 每隔 1.2 秒抓一帧保存到环形缓冲区
+// 高精度毫秒时间戳基准，消除秒级整跳
+let barBasePerfTime = performance.now() - (props.durationMs || 0)
+function getBarPreciseMs() {
+  const dur = props.durationMs || 0
+  const curPerf = performance.now()
+  const expected = curPerf - dur
+  if (Math.abs(expected - barBasePerfTime) > 1500) {
+    barBasePerfTime = expected
+  }
+  return Math.max(0, Math.round(curPerf - barBasePerfTime))
+}
+
+// 每隔 50ms 抓一帧保存到环形缓冲区 (20 FPS 超高清平滑帧率)
 function startFrameSampling() {
   stopFrameSampling()
   frameSampleTimer = setInterval(() => {
     captureCurrentFrame()
-  }, 1200)
+  }, 50)
 }
 
 function stopFrameSampling() {
@@ -608,7 +734,7 @@ function captureCurrentFrame() {
 
     ctx.drawImage(sourceEl, 0, 0, canvas.width, canvas.height)
 
-    const nowMs = props.durationMs || 0
+    const nowMs = getBarPreciseMs()
     // 会议前 90 秒的帧打上 isAnchor 标记，永久保存在缓冲区，保证回溯会议开头时随时能播放
     const isAnchor = nowMs <= 90000
 
@@ -620,8 +746,8 @@ function captureCurrentFrame() {
       subtitle: hoverSubtitleItem.value?.content || ''
     })
 
-    // 智能精简策略：当帧总数超过 800 帧时，不直接丢弃开头帧，而是抽取中间高密度非关键帧进行降采样
-    if (frameRingBuffer.value.length > 800) {
+    // 智能精简策略：当帧总数超过 3000 帧时，不直接丢弃开头帧，而是抽取中间高密度非关键帧进行降采样
+    if (frameRingBuffer.value.length > 3000) {
       pruneBufferKeepStart()
     }
   } catch (e) {}
@@ -630,7 +756,7 @@ function captureCurrentFrame() {
 // 保全会议开头的智能精简算法
 function pruneBufferKeepStart() {
   const list = frameRingBuffer.value
-  const nowMs = props.durationMs || 0
+  const nowMs = getBarPreciseMs()
   const recentThresholdMs = Math.max(0, nowMs - 120000) // 最近 2 分钟
 
   // 筛选出可精简的中间段：既非开头前 90 秒 Anchor，也非最近 2 分钟高密度的帧
@@ -654,28 +780,74 @@ function pruneBufferKeepStart() {
 }
 
 // ==========================================
-// 15 秒微型视频播放引擎：在悬停位置播放时刻起 15 秒内的动态视频
+// 15 秒微型视频播放引擎：基于 requestAnimationFrame 驱动 60Hz 循环播放
 // ==========================================
+let clipRafId = null
+let lastClipTimestamp = 0
+
 function start15sClipPlayback() {
   stop15sClipPlayback()
   clipElapsedMs.value = 0
+  lastClipTimestamp = 0
 
   // 立即绘制起始帧
   renderCurrentClipFrame()
 
-  // 以 80ms 为周期间隔步进，提供平滑流畅的 15 秒视频循环播放体验
-  clipPlaybackTimer = setInterval(() => {
+  function clipStep(timestamp) {
+    if (!hoverVisible.value && !isDragging.value) return
+    if (!lastClipTimestamp) lastClipTimestamp = timestamp
+    const delta = timestamp - lastClipTimestamp
+    lastClipTimestamp = timestamp
+
     const dur = clipWindowDurationMs.value
-    clipElapsedMs.value = (clipElapsedMs.value + 80) % dur
+    const step = Math.min(100, Math.max(10, delta))
+    clipElapsedMs.value = (clipElapsedMs.value + step) % dur
     renderCurrentClipFrame()
-  }, 80)
+    clipRafId = requestAnimationFrame(clipStep)
+  }
+
+  clipRafId = requestAnimationFrame(clipStep)
 }
 
 function stop15sClipPlayback() {
+  if (clipRafId) {
+    cancelAnimationFrame(clipRafId)
+    clipRafId = null
+  }
   if (clipPlaybackTimer) {
     clearInterval(clipPlaybackTimer)
     clipPlaybackTimer = null
   }
+  lastClipTimestamp = 0
+}
+
+// 二分查找最近帧
+function findClosestFrameInBar(list, targetTimeMs) {
+  if (!list || list.length === 0) return null
+  let low = 0
+  let high = list.length - 1
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    if (list[mid].timeMs === targetTimeMs) {
+      return list[mid]
+    } else if (list[mid].timeMs < targetTimeMs) {
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  let best = null
+  let minDiff = Infinity
+  for (const idx of [high, low]) {
+    if (idx >= 0 && idx < list.length) {
+      const diff = Math.abs(list[idx].timeMs - targetTimeMs)
+      if (diff < minDiff) {
+        minDiff = diff
+        best = list[idx]
+      }
+    }
+  }
+  return best || list[0]
 }
 
 // 绘制 15 秒内当前时刻对应的真实视频帧
@@ -686,27 +858,17 @@ function renderCurrentClipFrame() {
   if (!destCtx) return
 
   const targetTimeMs = currentClipPlaybackTimeMs.value
-  const list = frameRingBuffer.value
+  const list = (props.frameBuffer && props.frameBuffer.length > 0) ? props.frameBuffer : frameRingBuffer.value
 
   if (list.length === 0) {
     renderFallbackFrame(destCtx, destCanvas.width, destCanvas.height, targetTimeMs)
     return
   }
 
-  // 寻找与当前播放时刻 targetTimeMs 最匹配的视频帧（容差范围优先 7.5s 内）
-  let best = list[0]
-  let minDiff = Math.abs(list[0].timeMs - targetTimeMs)
+  const best = findClosestFrameInBar(list, targetTimeMs)
 
-  for (let i = 1; i < list.length; i++) {
-    const diff = Math.abs(list[i].timeMs - targetTimeMs)
-    if (diff < minDiff) {
-      minDiff = diff
-      best = list[i]
-    }
-  }
-
-  if (best && best.canvas) {
-    destCtx.drawImage(best.canvas, 0, 0, destCanvas.width, destCanvas.height)
+  if (best && (best.canvas || best.bitmap)) {
+    destCtx.drawImage(best.bitmap || best.canvas, 0, 0, destCanvas.width, destCanvas.height)
   } else {
     renderFallbackFrame(destCtx, destCanvas.width, destCanvas.height, targetTimeMs)
   }
@@ -1008,7 +1170,8 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   height: 100%;
-  border-right: 1.5px solid rgba(255, 255, 255, 0.35);
+  border-right: 2px solid rgba(255, 255, 255, 0.45);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1023,10 +1186,32 @@ onUnmounted(() => {
 }
 
 .topic-chunk.is-active-chunk {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.8), 0 0 8px rgba(255, 255, 255, 0.4);
+}
+
+.topic-chunk-played {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  pointer-events: none;
+  transition: width 0.05s linear;
+}
+
+.chunk-badge {
+  font-size: 9px;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 13px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  flex-shrink: 0;
 }
 
 .chunk-inner {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1051,9 +1236,9 @@ onUnmounted(() => {
 
 .chunk-timeband {
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(0, 0, 0, 0.35);
-  padding: 0 3px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 0 4px;
   border-radius: 2px;
 }
 
@@ -1114,19 +1299,28 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* 进度填色 */
-.track-fill {
+/* 进度发光底线 (细微高光，不遮盖各议题分段独立主题色) */
+.track-progress-underline {
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
-  height: 100%;
-  background: linear-gradient(90deg, #1677ff, #58a6ff);
-  border-radius: 5px;
+  height: 2.5px;
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+  border-radius: 1px;
   pointer-events: none;
+  z-index: 6;
 }
 
-.track-fill.rewound-fill {
+/* 回溯落后指示条 (仅在时移回溯时在底部提示落后区间) */
+.rewind-lag-track {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
   background: linear-gradient(90deg, #ff4d4f, #ff7875);
+  box-shadow: 0 0 8px rgba(255, 77, 79, 0.85);
+  pointer-events: none;
+  z-index: 6;
 }
 
 /* 实时最右端信标 */
@@ -1141,6 +1335,7 @@ onUnmounted(() => {
   transform: translate(50%, -50%);
   box-shadow: 0 0 6px #ff4d4f;
   pointer-events: none;
+  z-index: 7;
 }
 
 /* 可拖拽游标 */
@@ -1154,7 +1349,7 @@ onUnmounted(() => {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   cursor: grab;
-  z-index: 8;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;

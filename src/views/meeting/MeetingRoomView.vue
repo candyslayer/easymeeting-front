@@ -306,6 +306,7 @@
                   :segments="realtimeSegments"
                   :active-stream="spotlightStream"
                   :spotlight-member="spotlightMember"
+                  :frame-buffer="timeshiftFrames"
                   @seek="handleTimeShiftSeek"
                   @return-to-live="handleReturnToLive"
                 />
@@ -531,8 +532,55 @@
                   </div>
                 </div>
 
-                <!-- 时移回看画面遮罩浮层 (回溯模式) -->
+                <!-- 时移回看画面遮罩浮层 (回溯模式：展示当时的历史真实画面) -->
                 <div v-if="isTimeShiftActive" class="timeshift-replay-overlay">
+                  <!-- 核心：时移历史画面全屏视窗 -->
+                  <div class="timeshift-screen-container">
+                    <!-- 1. 原生高帧率 30 FPS 视频播放器 (超流畅原生视频回放流) -->
+                    <video
+                      v-show="isVideoPlaying"
+                      ref="timeshiftStageVideoRef"
+                      class="timeshift-stage-video"
+                      playsinline
+                      @timeupdate="onTimeshiftVideoTimeUpdate"
+                      @ended="handleReturnToLive"
+                    ></video>
+
+                    <!-- 2. 高帧率即时画布 (在寻道或切片加载间隙零延迟渲染，避免黑屏) -->
+                    <canvas
+                      v-show="!isVideoPlaying"
+                      ref="timeshiftStageCanvasRef"
+                      width="1280"
+                      height="720"
+                      class="timeshift-stage-canvas"
+                    ></canvas>
+
+                    <!-- 画面左下角历史回放时刻标签 -->
+                    <div class="timeshift-canvas-badge">
+                      <span class="ts-badge-dot"></span>
+                      <span class="ts-badge-text">会中回溯画面 · {{ formatMs(timeShiftCurrentMs) }}</span>
+                      <span v-if="isVideoPlaying" class="ts-fps-badge">30 FPS 原生流</span>
+                      <span v-if="isTimeshiftPlaying" class="ts-play-state">▶ 正在播放</span>
+                      <span v-else class="ts-play-state is-paused">⏸ 已暂停</span>
+                    </div>
+
+                    <!-- 右上角当前实时直播小窗 (PiP) -->
+                    <div class="timeshift-live-pip" title="当前实时直播画面">
+                      <div class="pip-inner">
+                        <VideoTile
+                          v-if="spotlightMember"
+                          :member="spotlightMember"
+                          :stream="spotlightStream"
+                          :compact="true"
+                        />
+                        <div class="pip-live-badge">
+                          <span class="live-dot green-pulse"></span>
+                          <span>实时 LIVE</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div class="timeshift-top-banner">
                     <div class="ts-banner-left">
                       <span class="ts-rewind-icon">⏪</span>
@@ -545,6 +593,14 @@
                     <div class="ts-banner-right">
                       <button
                         type="button"
+                        class="ts-quick-btn"
+                        :title="isTimeshiftPlaying ? '暂停回溯画面播放' : '恢复播放'"
+                        @click="toggleTimeshiftPlay"
+                      >
+                        <span>{{ isTimeshiftPlaying ? '⏸ 暂停' : '▶ 播放' }}</span>
+                      </button>
+                      <button
+                        type="button"
                         class="ts-quick-btn jump-start"
                         title="回溯到会议开头 00:00"
                         @click="handleTimeShiftSeek(0)"
@@ -555,7 +611,7 @@
                         type="button"
                         class="ts-quick-btn"
                         title="回退 10 秒"
-                        @click="handleTimeShiftSeek(Math.max(0, timeShiftCurrentMs - 10000))"
+                        @click="seekRelativeInOverlay(-10)"
                       >
                         <span>-10s</span>
                       </button>
@@ -563,7 +619,7 @@
                         type="button"
                         class="ts-quick-btn"
                         title="快进 10 秒"
-                        @click="handleTimeShiftSeek(Math.min(meetingDurationMs, timeShiftCurrentMs + 10000))"
+                        @click="seekRelativeInOverlay(10)"
                       >
                         <span>+10s</span>
                       </button>
@@ -610,6 +666,7 @@
                   :segments="realtimeSegments"
                   :active-stream="spotlightStream"
                   :spotlight-member="spotlightMember"
+                  :frame-buffer="timeshiftFrames"
                   @seek="handleTimeShiftSeek"
                   @return-to-live="handleReturnToLive"
                 />
@@ -945,6 +1002,7 @@
                 :segments="realtimeSegments"
                 :active-stream="spotlightStream"
                 :spotlight-member="spotlightMember"
+                :frame-buffer="timeshiftFrames"
                 @seek="handleTimeShiftSeek"
                 @return-to-live="handleReturnToLive"
               />
@@ -1480,6 +1538,20 @@ const screenShareInSpotlight = ref(true)
 // 会议时移回溯与短额回放状态 (视频下方进度条回溯)
 const isTimeShiftActive = ref(false)
 const timeShiftCurrentMs = ref(0)
+const timeshiftFrames = ref([])
+const timeshiftStageCanvasRef = ref(null)
+const timeshiftStageVideoRef = ref(null)
+const isVideoPlaying = ref(false)
+const isTimeshiftPlaying = ref(true)
+let timeshiftCaptureTimer = null
+let timeshiftPlayTimer = null
+let captureVideoEl = null
+
+// 原生 30 FPS 视频录制流与缓冲
+let stageMediaRecorder = null
+let stageRecordedBlobs = []
+let activeRecordingStream = null
+let currentVideoBlobUrl = null
 
 const meetingDurationMs = computed(() => {
   return (meetingStore.durationSeconds || 0) * 1000
@@ -1492,13 +1564,400 @@ const activeLiveTopics = computed(() => {
   return aiStore.agendaTopics || []
 })
 
+function initTimeshiftCapture() {
+  if (typeof document === 'undefined') return
+  if (!captureVideoEl) {
+    captureVideoEl = document.createElement('video')
+    captureVideoEl.muted = true
+    captureVideoEl.playsInline = true
+    captureVideoEl.autoplay = true
+  }
+}
+
+// 记录高精度毫秒级时间戳基准，消除秒级整跳
+let meetingStartPerformanceTime = performance.now() - (meetingStore.durationSeconds || 0) * 1000
+function getPreciseMeetingMs() {
+  const durationSec = meetingStore.durationSeconds || 0
+  const currentPerf = performance.now()
+  const expectedBase = currentPerf - durationSec * 1000
+  if (Math.abs(expectedBase - meetingStartPerformanceTime) > 1500) {
+    meetingStartPerformanceTime = expectedBase
+  }
+  return Math.max(0, Math.round(currentPerf - meetingStartPerformanceTime))
+}
+
+// 启动原生硬件 30 FPS MediaRecorder 持续录制主舞台画面
+function startStageRecording(streamOverride) {
+  if (typeof window === 'undefined' || !window.MediaRecorder) return
+  const stream = streamOverride || spotlightStream.value || localStream.value
+  if (!stream || !stream.active) return
+  const videoTracks = stream.getVideoTracks()
+  if (!videoTracks || videoTracks.length === 0) return
+
+  if (stageMediaRecorder && stageMediaRecorder.state !== 'inactive') {
+    if (activeRecordingStream === stream) return
+    stopStageRecording()
+  }
+
+  try {
+    let mimeType = 'video/webm'
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+      mimeType = 'video/webm;codecs=vp8,opus'
+    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+      mimeType = 'video/webm;codecs=vp9,opus'
+    } else if (MediaRecorder.isTypeSupported('video/webm')) {
+      mimeType = 'video/webm'
+    } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+      mimeType = 'video/mp4'
+    }
+
+    stageMediaRecorder = new MediaRecorder(stream, { mimeType })
+    activeRecordingStream = stream
+    stageMediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        stageRecordedBlobs.push(e.data)
+      }
+    }
+    stageMediaRecorder.start(1000)
+  } catch (err) {
+    console.warn('stageMediaRecorder init failed, relying on Turbo Canvas Engine:', err)
+  }
+}
+
+function stopStageRecording() {
+  if (stageMediaRecorder && stageMediaRecorder.state !== 'inactive') {
+    try {
+      stageMediaRecorder.stop()
+    } catch (e) {}
+  }
+  stageMediaRecorder = null
+  activeRecordingStream = null
+}
+
+// 启动 Turbo Canvas 高频采样 (50ms 周期，20 FPS 高清平滑采样，消除 1 FPS PPT 幻灯片感)
+function startTimeshiftCapture() {
+  stopTimeshiftCapture()
+  initTimeshiftCapture()
+  startStageRecording()
+  timeshiftCaptureTimer = setInterval(() => {
+    captureStageFrame()
+  }, 50)
+}
+
+function stopTimeshiftCapture() {
+  if (timeshiftCaptureTimer) {
+    clearInterval(timeshiftCaptureTimer)
+    timeshiftCaptureTimer = null
+  }
+}
+
+function captureStageFrame() {
+  if (typeof document === 'undefined') return
+  let videoEl = document.querySelector('.primary-spotlight-stage video')
+  if (!videoEl || videoEl.readyState < 2 || videoEl.paused) {
+    videoEl = document.querySelector('.stage-container video, .video-tile video, .meeting-grid video')
+  }
+  if ((!videoEl || videoEl.readyState < 2) && spotlightStream.value && spotlightStream.value.active) {
+    if (captureVideoEl) {
+      if (captureVideoEl.srcObject !== spotlightStream.value) {
+        captureVideoEl.srcObject = spotlightStream.value
+        captureVideoEl.play().catch(() => {})
+      }
+      if (captureVideoEl.readyState >= 2) {
+        videoEl = captureVideoEl
+      }
+    }
+  }
+  if (!videoEl || videoEl.readyState < 2) return
+
+  // 同时确保 MediaRecorder 在录制中
+  if (!stageMediaRecorder || stageMediaRecorder.state === 'inactive') {
+    startStageRecording()
+  }
+
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = 480
+    canvas.height = 270
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
+
+    // 采用高精度毫秒时间戳，每帧拥有独一无二的时间点
+    const nowMs = getPreciseMeetingMs()
+    // 会议前 90 秒打上 isAnchor 标记永久保留，确保随时能回溯到会议开头 00:00
+    const isAnchor = nowMs <= 90000
+
+    timeshiftFrames.value.push({
+      timeMs: nowMs,
+      canvas,
+      isAnchor,
+      speaker: spotlightMember.value?.nickName || '',
+      subtitle: latestSubtitleText.value || ''
+    })
+
+    if (timeshiftFrames.value.length > 3500) {
+      pruneTimeshiftFrames()
+    }
+  } catch (e) {}
+}
+
+function pruneTimeshiftFrames() {
+  const list = timeshiftFrames.value
+  const nowMs = getPreciseMeetingMs()
+  const recentThresholdMs = Math.max(0, nowMs - 120000)
+  const newList = []
+  let toggle = 0
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.timeMs <= 90000) {
+      if (i % 4 === 0 || item.isAnchor) {
+        newList.push(item)
+      }
+    } else if (item.timeMs >= recentThresholdMs) {
+      newList.push(item)
+    } else {
+      toggle++
+      if (toggle % 4 === 0) {
+        newList.push(item)
+      }
+    }
+  }
+  timeshiftFrames.value = newList
+}
+
+// 二分查找最近帧 (O(log N))
+function findClosestFrame(list, targetTimeMs) {
+  if (!list || list.length === 0) return null
+  let low = 0
+  let high = list.length - 1
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    if (list[mid].timeMs === targetTimeMs) {
+      return list[mid]
+    } else if (list[mid].timeMs < targetTimeMs) {
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  let best = null
+  let minDiff = Infinity
+  for (const idx of [high, low]) {
+    if (idx >= 0 && idx < list.length) {
+      const diff = Math.abs(list[idx].timeMs - targetTimeMs)
+      if (diff < minDiff) {
+        minDiff = diff
+        best = list[idx]
+      }
+    }
+  }
+  return best || list[0]
+}
+
+function renderTimeshiftStage() {
+  if (!isTimeShiftActive.value || !timeshiftStageCanvasRef.value) return
+  const canvas = timeshiftStageCanvasRef.value
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const targetTimeMs = timeShiftCurrentMs.value
+  const list = timeshiftFrames.value
+
+  if (list.length === 0) {
+    renderTimeshiftFallback(ctx, canvas.width, canvas.height, targetTimeMs)
+    return
+  }
+
+  const best = findClosestFrame(list, targetTimeMs)
+
+  if (best && (best.canvas || best.bitmap)) {
+    ctx.drawImage(best.bitmap || best.canvas, 0, 0, canvas.width, canvas.height)
+  } else {
+    renderTimeshiftFallback(ctx, canvas.width, canvas.height, targetTimeMs)
+  }
+}
+
+function renderTimeshiftFallback(ctx, width, height, timeMs) {
+  ctx.fillStyle = '#0d1117'
+  ctx.fillRect(0, 0, width, height)
+
+  const grad = ctx.createLinearGradient(0, 0, width, height)
+  grad.addColorStop(0, '#1677ff')
+  grad.addColorStop(1, '#0958d9')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, height - 4, width, 4)
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+  ctx.font = 'bold 22px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText('会中历史讨论回看中', width / 2, height / 2 - 25)
+
+  ctx.fillStyle = '#58a6ff'
+  ctx.font = '18px monospace'
+  ctx.fillText(`${formatMs(timeMs)}`, width / 2, height / 2 + 15)
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+  ctx.font = '13px sans-serif'
+  ctx.fillText('正在定位历史讨论画面...', width / 2, height / 2 + 50)
+}
+
+function toggleTimeshiftPlay() {
+  if (isVideoPlaying.value && timeshiftStageVideoRef.value) {
+    if (timeshiftStageVideoRef.value.paused) {
+      timeshiftStageVideoRef.value.play().catch(() => {})
+      isTimeshiftPlaying.value = true
+    } else {
+      timeshiftStageVideoRef.value.pause()
+      isTimeshiftPlaying.value = false
+    }
+  } else {
+    isTimeshiftPlaying.value = !isTimeshiftPlaying.value
+    if (isTimeshiftPlaying.value) {
+      startTimeshiftPlayback()
+    } else {
+      stopTimeshiftPlayback()
+    }
+  }
+}
+
+// Turbo Canvas 播放引擎：基于 requestAnimationFrame 与 20 FPS 高频缓冲池，消除 PPT 顿挫感
+let timeshiftRafId = null
+let lastRafTimestamp = 0
+
+function startTimeshiftPlayback() {
+  stopTimeshiftPlayback()
+  if (!isTimeshiftPlaying.value) return
+  lastRafTimestamp = 0
+
+  function rafStep(timestamp) {
+    if (!isTimeShiftActive.value || !isTimeshiftPlaying.value) return
+    if (!lastRafTimestamp) lastRafTimestamp = timestamp
+    const delta = timestamp - lastRafTimestamp
+    lastRafTimestamp = timestamp
+
+    const step = Math.min(100, Math.max(10, delta))
+    const nextTime = timeShiftCurrentMs.value + step
+
+    if (nextTime >= meetingDurationMs.value - 1200 && meetingDurationMs.value > 1200) {
+      handleReturnToLive()
+      return
+    }
+    timeShiftCurrentMs.value = nextTime
+    renderTimeshiftStage()
+    timeshiftRafId = requestAnimationFrame(rafStep)
+  }
+
+  timeshiftRafId = requestAnimationFrame(rafStep)
+}
+
+function stopTimeshiftPlayback() {
+  if (timeshiftRafId) {
+    cancelAnimationFrame(timeshiftRafId)
+    timeshiftRafId = null
+  }
+  if (timeshiftPlayTimer) {
+    clearInterval(timeshiftPlayTimer)
+    timeshiftPlayTimer = null
+  }
+  lastRafTimestamp = 0
+}
+
+function onTimeshiftVideoTimeUpdate() {
+  if (!timeshiftStageVideoRef.value || !isVideoPlaying.value) return
+  const curMs = Math.round(timeshiftStageVideoRef.value.currentTime * 1000)
+  timeShiftCurrentMs.value = curMs
+  if (curMs >= meetingDurationMs.value - 1500 && meetingDurationMs.value > 1500) {
+    handleReturnToLive()
+  }
+}
+
+function seekRelativeInOverlay(deltaSec) {
+  if (isVideoPlaying.value && timeshiftStageVideoRef.value) {
+    const newSec = Math.max(0, timeshiftStageVideoRef.value.currentTime + deltaSec)
+    if (newSec * 1000 >= meetingDurationMs.value - 1500 && meetingDurationMs.value > 1500) {
+      handleReturnToLive()
+    } else {
+      timeshiftStageVideoRef.value.currentTime = newSec
+      timeShiftCurrentMs.value = Math.round(newSec * 1000)
+    }
+  } else {
+    const newMs = Math.max(0, timeShiftCurrentMs.value + deltaSec * 1000)
+    handleTimeShiftSeek(newMs)
+  }
+}
+
 function handleTimeShiftSeek(targetMs) {
+  const maxMs = meetingDurationMs.value || 0
+  if (targetMs >= maxMs - 2000 && maxMs > 2000) {
+    handleReturnToLive()
+    return
+  }
   isTimeShiftActive.value = true
-  timeShiftCurrentMs.value = targetMs
+  timeShiftCurrentMs.value = Math.max(0, targetMs)
+  isTimeshiftPlaying.value = true
+
+  // 1. 0 延迟即时渲染当前帧到画布
+  nextTick(() => {
+    renderTimeshiftStage()
+  })
+
+  // 2. 尝试启动原生 30 FPS 原生视频回放
+  let videoStarted = false
+  if (stageRecordedBlobs && stageRecordedBlobs.length > 0 && timeshiftStageVideoRef.value) {
+    try {
+      if (stageMediaRecorder && stageMediaRecorder.state === 'recording') {
+        try { stageMediaRecorder.requestData() } catch (e) {}
+      }
+      const mimeType = stageMediaRecorder?.mimeType || 'video/webm'
+      const blob = new Blob(stageRecordedBlobs, { type: mimeType })
+      if (currentVideoBlobUrl) {
+        URL.revokeObjectURL(currentVideoBlobUrl)
+      }
+      currentVideoBlobUrl = URL.createObjectURL(blob)
+      const vid = timeshiftStageVideoRef.value
+      vid.src = currentVideoBlobUrl
+      vid.currentTime = Math.max(0, targetMs / 1000)
+      const playPromise = vid.play()
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            isVideoPlaying.value = true
+            stopTimeshiftPlayback()
+          })
+          .catch((err) => {
+            console.warn('Native video play failed, falling back to Turbo Canvas:', err)
+            isVideoPlaying.value = false
+            startTimeshiftPlayback()
+          })
+        videoStarted = true
+      }
+    } catch (e) {
+      console.warn('Native video seek failed, falling back to Turbo Canvas:', e)
+      isVideoPlaying.value = false
+    }
+  }
+
+  // 3. 若无视频流或视频尚未启动，则由 14.3 FPS Turbo Canvas 驱动播放
+  if (!videoStarted) {
+    isVideoPlaying.value = false
+    startTimeshiftPlayback()
+  }
 }
 
 function handleReturnToLive() {
   isTimeShiftActive.value = false
+  isVideoPlaying.value = false
+  if (timeshiftStageVideoRef.value) {
+    timeshiftStageVideoRef.value.pause()
+    timeshiftStageVideoRef.value.removeAttribute('src')
+    timeshiftStageVideoRef.value.load()
+  }
+  if (currentVideoBlobUrl) {
+    URL.revokeObjectURL(currentVideoBlobUrl)
+    currentVideoBlobUrl = null
+  }
+  stopTimeshiftPlayback()
   timeShiftCurrentMs.value = meetingDurationMs.value
 }
 
@@ -2391,6 +2850,13 @@ onMounted(() => {
   initMeetingRoom()
   startSpeakerDetection()
   startStatsPolling()
+  startTimeshiftCapture()
+})
+
+watch(spotlightStream, (newStream) => {
+  if (newStream && newStream.active) {
+    startStageRecording(newStream)
+  }
 })
 
 onUnmounted(() => {
@@ -2398,6 +2864,9 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('click', resumeSpeakerCtx)
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  stopTimeshiftCapture()
+  stopTimeshiftPlayback()
+  stopStageRecording()
   stopSpeakerDetection()
   stopStatsPolling()
   stopAllTracks()
@@ -3322,17 +3791,131 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: #000000;
   z-index: 18;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 16px;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+.timeshift-screen-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000000;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.timeshift-stage-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.timeshift-stage-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000000;
+}
+
+.ts-fps-badge {
+  background: rgba(22, 119, 255, 0.35);
+  color: #58a6ff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  border: 1px solid rgba(88, 166, 255, 0.4);
+}
+
+.timeshift-canvas-badge {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(13, 17, 23, 0.88);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  border-radius: 6px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #c9d1d9;
+  z-index: 3;
+  backdrop-filter: blur(8px);
+}
+
+.ts-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d4f;
+}
+
+.ts-badge-text {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.ts-play-state {
+  color: #7ee787;
+  font-weight: 600;
+}
+
+.ts-play-state.is-paused {
+  color: #fa8c16;
+}
+
+/* 实时小画中画 */
+.timeshift-live-pip {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  width: 180px;
+  height: 102px;
+  background: #0d1117;
+  border: 1.5px solid rgba(82, 196, 26, 0.6);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  z-index: 4;
+}
+
+.pip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.pip-live-badge {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: #73d13d;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
 }
 
 .timeshift-top-banner {
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3435,6 +4018,8 @@ onUnmounted(() => {
 }
 
 .timeshift-subtitle-float {
+  position: relative;
+  z-index: 10;
   align-self: center;
   background: rgba(0, 0, 0, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.15);
