@@ -212,6 +212,12 @@ export function resolvePlaybackUrl(url) {
   if (url.startsWith('/replay/')) {
     return `${base}/file${url}`
   }
+  if (url.startsWith('recording/')) {
+    return `${base}/file/${url}`
+  }
+  if (url.startsWith('/recording/')) {
+    return `${base}/file${url}`
+  }
   if (!url.startsWith('/')) {
     return `${base}/${url}`
   }

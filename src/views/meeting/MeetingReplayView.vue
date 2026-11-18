@@ -101,6 +101,7 @@
             :playback-url="currentPlaybackUrl"
             :duration-ms="replayStore.totalDurationMs"
             :media-title="replayStore.selectedRecording?.fileName || meetingInfo?.meetingName || '会议录像'"
+            :media-type="replayStore.selectedRecording?.mediaType"
             :status="replayStore.playbackInfo?.processingStatus || replayStore.selectedRecording?.processingStatus"
             :error-message="replayStore.playbackInfo?.processingError"
             :topics="replayStore.topics"
@@ -374,7 +375,7 @@
                 <span class="t-time mono">{{ formatMs(item.startTimeMs) }}</span>
                 <span class="t-speaker">{{ item.speakerName || '参会人' }}</span>
               </div>
-              <div class="t-row-text" v-html="highlightKeyword(item.content, searchKeyword)"></div>
+              <div class="t-row-text" v-html="highlightKeyword(item.content || item.currentText || item.originalText, searchKeyword)"></div>
             </div>
           </div>
         </div>

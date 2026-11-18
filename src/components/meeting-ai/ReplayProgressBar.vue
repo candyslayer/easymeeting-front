@@ -77,7 +77,7 @@
     >
       <div class="hover-preview-card">
         <!-- 短额视频回放小窗 -->
-        <div v-if="playbackUrl" class="mini-hover-video-box">
+        <div v-if="isVideoUrl" class="mini-hover-video-box">
           <video
             ref="hoverMiniVideoRef"
             :src="playbackUrl"
@@ -156,6 +156,17 @@ const dragTimeMs = ref(0)
 const hoverVisible = ref(false)
 const hoverPercent = ref(0)
 const hoverTimeMs = ref(0)
+
+const isVideoUrl = computed(() => {
+  if (!props.playbackUrl) return false
+  const url = props.playbackUrl.toLowerCase()
+  return (
+    url.includes('.m3u8') ||
+    url.includes('.mp4') ||
+    url.includes('.mkv') ||
+    url.includes('.mov')
+  )
+})
 
 // 有效总时长 (若外部未传递或为 0，尝试从议题或事件中计算最大结束时间)
 const safeDurationMs = computed(() => {

@@ -65,13 +65,16 @@ export const useMeetingReplayStore = defineStore('meetingReplay', {
 
     // 录像总时长毫秒
     totalDurationMs: (state) => {
-      if (state.playbackInfo?.durationMs) {
+      if (state.playbackInfo?.durationMs && state.playbackInfo.durationMs > 0) {
         return state.playbackInfo.durationMs
       }
-      if (state.timeline?.totalDurationMs) {
+      if (state.timeline?.totalDurationMs && state.timeline.totalDurationMs > 0) {
         return state.timeline.totalDurationMs
       }
-      if (state.selectedRecording?.durationSeconds) {
+      if (state.selectedRecording?.durationMs && state.selectedRecording.durationMs > 0) {
+        return state.selectedRecording.durationMs
+      }
+      if (state.selectedRecording?.durationSeconds && state.selectedRecording.durationSeconds > 0) {
         return state.selectedRecording.durationSeconds * 1000
       }
       return 0

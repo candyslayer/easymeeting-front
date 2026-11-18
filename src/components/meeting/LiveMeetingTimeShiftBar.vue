@@ -3,8 +3,19 @@
     class="live-timeshift-bar-container"
     :class="{ 'is-rewound': isRewound, 'is-dragging': isDragging }"
   >
-    <!-- 左侧控制区：快退按钮 + 时间显示 -->
+    <!-- 左侧控制区：回到开头 + 快退按钮 + 时间显示 -->
     <div class="timeshift-left-controls">
+      <!-- 回到开头按钮 -->
+      <button
+        type="button"
+        class="shift-btn jump-start-btn"
+        title="回溯到会议开头 (00:00)"
+        @click="seekToStart"
+      >
+        <span class="btn-icon">⏮</span>
+        <span>回到开头</span>
+      </button>
+
       <button
         type="button"
         class="shift-btn text-btn"
@@ -42,21 +53,53 @@
       @touchstart.passive="handleTouchStart"
     >
       <div class="track-bg">
-        <!-- 议题色块分布 -->
+        <!-- 议题分段色块分布（标识议题与明确时间端） -->
         <div
           v-for="(topic, idx) in normalizedTopics"
           :key="topic.id || idx"
           class="topic-chunk"
+          :class="{ 'is-active-chunk': isCurrentTopic(topic) }"
           :style="{
             left: `${topic.leftPercent}%`,
             width: `${topic.widthPercent}%`,
             backgroundColor: getTopicColor(idx)
           }"
-          :title="`议题: ${topic.title} (${formatMs(topic.startTimeMs)} - ${formatMs(topic.endTimeMs)})`"
+          @click.stop="seekToMs(topic.startTimeMs)"
         >
-          <span v-if="topic.widthPercent > 6" class="chunk-label ellipsis">
-            {{ topic.title }}
-          </span>
+          <a-tooltip placement="top" :mouse-enter-delay="0.15">
+            <template #title>
+              <div class="topic-tooltip-content">
+                <div class="topic-tt-header">
+                  <span class="topic-tt-badge" :style="{ backgroundColor: getTopicBadgeColor(idx) }">
+                    议题 {{ idx + 1 }}
+                  </span>
+                  <span class="topic-tt-title font-bold">{{ topic.title }}</span>
+                </div>
+                <div class="topic-tt-timeband">
+                  <span class="tt-icon">⏱</span>
+                  <span class="tt-range mono">{{ topic.timeBandStr }}</span>
+                  <span class="tt-dur">(持续 {{ topic.durationStr }})</span>
+                </div>
+                <div v-if="topic.summary || topic.content" class="topic-tt-summary">
+                  {{ topic.summary || topic.content }}
+                </div>
+                <div class="topic-tt-action">
+                  <span>👉 点击跳转至该议题开头 ({{ formatMs(topic.startTimeMs) }})</span>
+                </div>
+              </div>
+            </template>
+
+            <div class="chunk-inner">
+              <span class="chunk-index font-bold">#{{ idx + 1 }}</span>
+              <span v-if="topic.widthPercent > 5" class="chunk-title ellipsis">
+                {{ topic.title }}
+              </span>
+              <!-- 明确标识时间端 [00:00 - 08:30] -->
+              <span v-if="topic.widthPercent > 10" class="chunk-timeband mono">
+                {{ topic.timeBandStr }}
+              </span>
+            </div>
+          </a-tooltip>
         </div>
 
         <!-- 播放/回溯已走过的进度条 -->
@@ -103,28 +146,42 @@
         </div>
       </div>
 
-      <!-- 鼠标悬停 / 拖动时的「短额回放播放」浮动预览小窗 -->
+      <!-- 鼠标悬停 / 拖动时的「15 秒短视频播放」浮动预览小窗 -->
       <div
         v-if="hoverVisible || isDragging"
         class="hover-preview-indicator"
         :style="{ left: `${isDragging ? dragPercent : hoverPercent}%` }"
       >
         <div class="hover-preview-card">
-          <!-- 核心：短额回放微型视频播放视窗 -->
-          <div class="mini-screen-box">
-            <canvas ref="hoverCanvasRef" width="200" height="112" class="mini-canvas"></canvas>
-            
-            <div class="mini-live-tag">
-              <span class="red-pulse-dot"></span>
-              <span>短额回放</span>
+          <!-- 顶部状态栏：15s 视频回放与时刻区间 -->
+          <div class="clip-top-bar">
+            <div class="clip-badge">
+              <span class="clip-play-dot pulse"></span>
+              <span class="clip-mode-text">15s 视频速览</span>
             </div>
-
-            <div class="mini-time-tag mono">
-              {{ formatMs(currentHoverTimeMs) }}
+            <div class="clip-range-pill mono">
+              {{ formatMs(clipStartMs) }} - {{ formatMs(clipEndMs) }}
             </div>
           </div>
 
-          <!-- 画面附带的实时情报：发言人与字幕 -->
+          <!-- 核心：15 秒微型视频播放视窗 -->
+          <div class="mini-screen-box">
+            <canvas ref="hoverCanvasRef" width="240" height="135" class="mini-canvas"></canvas>
+
+            <!-- 15秒循环播放进度条 -->
+            <div class="clip-15s-scrubber">
+              <div class="clip-15s-fill" :style="{ width: `${clipProgressPercent}%` }"></div>
+            </div>
+
+            <!-- 当前播放时刻与 15s 进度角标 -->
+            <div class="mini-time-tag mono">
+              <span class="cur-t">{{ formatMs(currentClipPlaybackTimeMs) }}</span>
+              <span class="t-sep">/</span>
+              <span class="sec-delta">+{{ (clipElapsedMs / 1000).toFixed(1) }}s</span>
+            </div>
+          </div>
+
+          <!-- 画面附带的情报：随 15s 播放动态变化的发言人与字幕 -->
           <div class="hover-info-body">
             <div v-if="hoverSpeaker || hoverSubtitle" class="hover-subtitle-row">
               <span v-if="hoverSpeaker" class="hover-speaker-name">{{ hoverSpeaker }}:</span>
@@ -133,7 +190,8 @@
 
             <div v-if="hoverTopic" class="hover-topic-row ellipsis">
               <span class="topic-tag-pill">议题</span>
-              <span class="ellipsis">{{ hoverTopic.title }}</span>
+              <span class="ellipsis topic-name-span">{{ hoverTopic.title }}</span>
+              <span class="topic-span-range mono">{{ hoverTopic.timeBandStr }}</span>
             </div>
 
             <div v-if="hoverEvent" class="hover-event-row ellipsis">
@@ -233,11 +291,19 @@ const hoverVisible = ref(false)
 const hoverPercent = ref(0)
 const hoverTimeMs = ref(0)
 
-// 缓存的历史帧环形缓冲区，用于提供鼠标悬停时的短额回放播放
-// 每个条目：{ timeMs, canvas, dataUrl, speaker, content }
+// 15 秒视频切片播放状态
+const clipElapsedMs = ref(0)
+const clipProgressPercent = computed(() => {
+  const dur = clipWindowDurationMs.value
+  if (dur <= 0) return 0
+  return Math.min(100, Math.max(0, (clipElapsedMs.value / dur) * 100))
+})
+
+// 缓存的历史视频帧环形缓冲区（分层保全策略：开头的帧永不丢弃，确保随时能回溯到会议开头）
+// 每个条目：{ timeMs, canvas, isAnchor, speaker, subtitle }
 const frameRingBuffer = ref([])
 let frameSampleTimer = null
-let animationLoopTimer = null
+let clipPlaybackTimer = null
 let sampleVideoEl = null
 
 // 有效总时长（保底 30 秒）
@@ -250,7 +316,7 @@ const displayTimeMs = computed(() => {
   if (isDragging.value) {
     return dragTimeMs.value
   }
-  return props.currentTimeMs || props.durationMs || 0
+  return props.currentTimeMs ?? props.durationMs ?? 0
 })
 
 // 当前播放/回溯百分比 (0 - 100)
@@ -258,7 +324,7 @@ const displayPercent = computed(() => {
   if (safeDurationMs.value <= 0) return 100
   if (isDragging.value) return dragPercent.value
   if (!props.isRewound) return 100
-  const p = (props.currentTimeMs / safeDurationMs.value) * 100
+  const p = ((props.currentTimeMs ?? 0) / safeDurationMs.value) * 100
   return Math.min(100, Math.max(0, p))
 })
 
@@ -267,21 +333,92 @@ const currentHoverTimeMs = computed(() => {
   return isDragging.value ? dragTimeMs.value : hoverTimeMs.value
 })
 
-// 归一化议题色块
+// 15 秒短视频窗口区间：从当前悬停时刻开始算起 15 秒内
+const clipStartMs = computed(() => {
+  const t = currentHoverTimeMs.value
+  const total = safeDurationMs.value
+  // 若距离尾部不足 5 秒且总时长大于 15 秒，向左平移保证 15 秒视窗
+  if (total > 15000 && t > total - 5000) {
+    return Math.max(0, total - 15000)
+  }
+  return Math.max(0, t)
+})
+
+const clipEndMs = computed(() => {
+  const start = clipStartMs.value
+  const total = safeDurationMs.value
+  return Math.min(total, start + 15000)
+})
+
+const clipWindowDurationMs = computed(() => {
+  return Math.max(1000, clipEndMs.value - clipStartMs.value)
+})
+
+// 15 秒内正在播放的当前绝对时刻
+const currentClipPlaybackTimeMs = computed(() => {
+  return clipStartMs.value + clipElapsedMs.value
+})
+
+// 格式化持续时长字符串，如 "8分30秒" 或 "45秒"
+function formatDurationStr(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes > 0) {
+    return `${minutes}分${seconds > 0 ? `${seconds}秒` : ''}`
+  }
+  return `${seconds}秒`
+}
+
+// 归一化议题分段：保证明确标识时间端 [startTime - endTime] 与持续时长
 const normalizedTopics = computed(() => {
-  if (safeDurationMs.value <= 0) return []
-  return props.topics.map((t) => {
-    const start = Math.max(0, t.startTimeMs || 0)
-    const end = Math.min(safeDurationMs.value, t.endTimeMs || safeDurationMs.value)
-    const leftPercent = (start / safeDurationMs.value) * 100
-    const widthPercent = Math.max(1, ((end - start) / safeDurationMs.value) * 100)
+  const duration = safeDurationMs.value
+  if (duration <= 0 || !props.topics || props.topics.length === 0) return []
+
+  const rawList = [...props.topics]
+  const count = rawList.length
+
+  return rawList.map((t, idx) => {
+    const title = t.title || t.topicName || t.name || `议题 ${idx + 1}`
+    let start = t.startTimeMs
+    let end = t.endTimeMs
+
+    // 如果未带毫秒时间戳，根据排序均分或推导
+    if (start === undefined || start === null) {
+      start = Math.round((idx / count) * duration)
+    }
+    if (end === undefined || end === null || end <= start) {
+      if (idx < count - 1 && rawList[idx + 1].startTimeMs) {
+        end = rawList[idx + 1].startTimeMs
+      } else {
+        end = Math.min(duration, Math.round(((idx + 1) / count) * duration))
+      }
+    }
+
+    start = Math.max(0, Math.min(duration, start))
+    end = Math.max(start + 1000, Math.min(duration, end))
+
+    const leftPercent = (start / duration) * 100
+    const widthPercent = Math.max(2, ((end - start) / duration) * 100)
+    const durMs = end - start
+
     return {
       ...t,
+      title,
+      startTimeMs: start,
+      endTimeMs: end,
       leftPercent,
-      widthPercent
+      widthPercent,
+      timeBandStr: `[${formatMs(start)} - ${formatMs(end)}]`,
+      durationStr: formatDurationStr(durMs)
     }
   })
 })
+
+function isCurrentTopic(topic) {
+  const cur = displayTimeMs.value
+  return cur >= topic.startTimeMs && cur <= topic.endTimeMs
+}
 
 // 归一化事件图钉
 const normalizedEvents = computed(() => {
@@ -297,16 +434,29 @@ const normalizedEvents = computed(() => {
 
 // 议题色板
 const topicColors = [
-  'rgba(22, 119, 255, 0.35)',
-  'rgba(19, 194, 194, 0.35)',
-  'rgba(82, 196, 26, 0.35)',
-  'rgba(250, 140, 22, 0.35)',
-  'rgba(114, 46, 209, 0.35)',
-  'rgba(235, 47, 150, 0.35)'
+  'rgba(22, 119, 255, 0.42)',
+  'rgba(19, 194, 194, 0.42)',
+  'rgba(82, 196, 26, 0.42)',
+  'rgba(250, 140, 22, 0.42)',
+  'rgba(114, 46, 209, 0.42)',
+  'rgba(235, 47, 150, 0.42)'
+]
+
+const topicBadgeColors = [
+  '#1677ff',
+  '#13c2c2',
+  '#52c41a',
+  '#fa8c16',
+  '#722ed1',
+  '#eb2f96'
 ]
 
 function getTopicColor(index) {
   return topicColors[index % topicColors.length]
+}
+
+function getTopicBadgeColor(index) {
+  return topicBadgeColors[index % topicBadgeColors.length]
 }
 
 function getEventTagColor(type) {
@@ -333,19 +483,17 @@ function getEventLabel(type) {
 
 // 悬停命中议题
 const hoverTopic = computed(() => {
-  if (!props.topics || props.topics.length === 0) return null
-  const t = currentHoverTimeMs.value
-  return props.topics.find((item) => {
-    const start = item.startTimeMs || 0
-    const end = item.endTimeMs || safeDurationMs.value
-    return t >= start && t <= end
+  if (!normalizedTopics.value || normalizedTopics.value.length === 0) return null
+  const t = currentClipPlaybackTimeMs.value
+  return normalizedTopics.value.find((item) => {
+    return t >= item.startTimeMs && t <= item.endTimeMs
   }) || null
 })
 
-// 悬停命中最近事件 (15 秒阈值)
+// 悬停命中最近事件
 const hoverEvent = computed(() => {
   if (!props.events || props.events.length === 0) return null
-  const t = currentHoverTimeMs.value
+  const t = currentClipPlaybackTimeMs.value
   let closest = null
   let minDiff = 15000
   props.events.forEach((evt) => {
@@ -358,11 +506,10 @@ const hoverEvent = computed(() => {
   return closest
 })
 
-// 悬停命中发言人与字幕原话
+// 悬停命中发言人与字幕原话 (随 15 秒视频动态播放实时刷新)
 const hoverSubtitleItem = computed(() => {
   if (!props.segments || props.segments.length === 0) return null
-  const t = currentHoverTimeMs.value
-  // 优先查找覆盖该时间点的转写段落
+  const t = currentClipPlaybackTimeMs.value
   const exact = props.segments.find((s) => {
     const start = s.startTimeMs || 0
     const end = s.endTimeMs || (start + 5000)
@@ -370,7 +517,6 @@ const hoverSubtitleItem = computed(() => {
   })
   if (exact) return exact
 
-  // 兜底找最临近段落
   let closest = null
   let minDiff = 12000
   props.segments.forEach((s) => {
@@ -392,7 +538,8 @@ const hoverSubtitle = computed(() => {
 })
 
 // ==========================================
-// 核心：定时从 activeStream 抓取真实画面帧，构建短额回放画廊
+// 核心：定时从 activeStream / DOM 抓取真实视频帧
+// 分层保全机制：确保从 00:00 开头到最新的视频帧均有采样
 // ==========================================
 function initSampleVideo() {
   if (typeof document === 'undefined') return
@@ -420,12 +567,12 @@ watch(
   { immediate: true }
 )
 
-// 每隔 1.5 秒抓一帧保存到环形缓冲区
+// 每隔 1.2 秒抓一帧保存到环形缓冲区
 function startFrameSampling() {
   stopFrameSampling()
   frameSampleTimer = setInterval(() => {
     captureCurrentFrame()
-  }, 1500)
+  }, 1200)
 }
 
 function stopFrameSampling() {
@@ -436,121 +583,163 @@ function stopFrameSampling() {
 }
 
 function captureCurrentFrame() {
-  if (!sampleVideoEl || sampleVideoEl.readyState < 2) return
+  // 优先从 sampleVideoEl 抓取，若不可用则从 DOM 中正在播放的视频元素获取
+  let sourceEl = sampleVideoEl
+  if (!sourceEl || sourceEl.readyState < 2) {
+    if (typeof document !== 'undefined') {
+      const vids = document.querySelectorAll('.primary-spotlight-stage video, .video-tile video, .meeting-grid video')
+      for (const v of vids) {
+        if (v && v.readyState >= 2 && !v.paused) {
+          sourceEl = v
+          break
+        }
+      }
+    }
+  }
+
+  if (!sourceEl || sourceEl.readyState < 2) return
+
   try {
     const canvas = document.createElement('canvas')
-    canvas.width = 200
-    canvas.height = 112
+    canvas.width = 240
+    canvas.height = 135
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    ctx.drawImage(sampleVideoEl, 0, 0, canvas.width, canvas.height)
+    ctx.drawImage(sourceEl, 0, 0, canvas.width, canvas.height)
 
     const nowMs = props.durationMs || 0
+    // 会议前 90 秒的帧打上 isAnchor 标记，永久保存在缓冲区，保证回溯会议开头时随时能播放
+    const isAnchor = nowMs <= 90000
+
     frameRingBuffer.value.push({
       timeMs: nowMs,
       canvas,
+      isAnchor,
       speaker: props.spotlightMember?.nickName || '',
       subtitle: hoverSubtitleItem.value?.content || ''
     })
 
-    // 维持最多 600 帧（可覆盖 15 分钟密集抽样，仅占用极微内存）
-    if (frameRingBuffer.value.length > 600) {
-      frameRingBuffer.value.shift()
+    // 智能精简策略：当帧总数超过 800 帧时，不直接丢弃开头帧，而是抽取中间高密度非关键帧进行降采样
+    if (frameRingBuffer.value.length > 800) {
+      pruneBufferKeepStart()
     }
   } catch (e) {}
 }
 
-// ==========================================
-// 悬停动画播放器：根据鼠标位置短额回放 3~5 帧
-// ==========================================
-let animFrameIndex = 0
-let animCandidateFrames = []
+// 保全会议开头的智能精简算法
+function pruneBufferKeepStart() {
+  const list = frameRingBuffer.value
+  const nowMs = props.durationMs || 0
+  const recentThresholdMs = Math.max(0, nowMs - 120000) // 最近 2 分钟
 
-function startHoverMiniPlayback() {
-  stopHoverMiniPlayback()
-  animFrameIndex = 0
-  updateCandidateFrames()
+  // 筛选出可精简的中间段：既非开头前 90 秒 Anchor，也非最近 2 分钟高密度的帧
+  const newList = []
+  let dropToggle = false
 
-  // 以 4 帧/秒循环播放当前悬停时间点周围的一小段短额切片
-  animationLoopTimer = setInterval(() => {
-    if (!hoverCanvasRef.value || animCandidateFrames.length === 0) return
-    const target = animCandidateFrames[animFrameIndex % animCandidateFrames.length]
-    if (target && target.canvas) {
-      const destCtx = hoverCanvasRef.value.getContext('2d')
-      if (destCtx) {
-        destCtx.drawImage(target.canvas, 0, 0, hoverCanvasRef.value.width, hoverCanvasRef.value.height)
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.isAnchor || item.timeMs <= 90000 || item.timeMs >= recentThresholdMs) {
+      newList.push(item)
+    } else {
+      // 中间段隔帧保留一帧
+      if (dropToggle) {
+        newList.push(item)
       }
+      dropToggle = !dropToggle
     }
-    animFrameIndex++
-  }, 240)
+  }
+
+  frameRingBuffer.value = newList
 }
 
-function stopHoverMiniPlayback() {
-  if (animationLoopTimer) {
-    clearInterval(animationLoopTimer)
-    animationLoopTimer = null
+// ==========================================
+// 15 秒微型视频播放引擎：在悬停位置播放时刻起 15 秒内的动态视频
+// ==========================================
+function start15sClipPlayback() {
+  stop15sClipPlayback()
+  clipElapsedMs.value = 0
+
+  // 立即绘制起始帧
+  renderCurrentClipFrame()
+
+  // 以 80ms 为周期间隔步进，提供平滑流畅的 15 秒视频循环播放体验
+  clipPlaybackTimer = setInterval(() => {
+    const dur = clipWindowDurationMs.value
+    clipElapsedMs.value = (clipElapsedMs.value + 80) % dur
+    renderCurrentClipFrame()
+  }, 80)
+}
+
+function stop15sClipPlayback() {
+  if (clipPlaybackTimer) {
+    clearInterval(clipPlaybackTimer)
+    clipPlaybackTimer = null
   }
 }
 
-function updateCandidateFrames() {
-  const t = currentHoverTimeMs.value
+// 绘制 15 秒内当前时刻对应的真实视频帧
+function renderCurrentClipFrame() {
+  if (!hoverCanvasRef.value) return
+  const destCanvas = hoverCanvasRef.value
+  const destCtx = destCanvas.getContext('2d')
+  if (!destCtx) return
+
+  const targetTimeMs = currentClipPlaybackTimeMs.value
   const list = frameRingBuffer.value
+
   if (list.length === 0) {
-    animCandidateFrames = []
-    renderFallbackFrame()
+    renderFallbackFrame(destCtx, destCanvas.width, destCanvas.height, targetTimeMs)
     return
   }
 
-  // 查找在 t 前后 5 秒以内的所有帧
-  const matched = list.filter((f) => Math.abs(f.timeMs - t) <= 6000)
-  if (matched.length > 0) {
-    animCandidateFrames = matched
-  } else {
-    // 找距离最近的一帧
-    let nearest = list[0]
-    let minD = Math.abs(nearest.timeMs - t)
-    for (let i = 1; i < list.length; i++) {
-      const d = Math.abs(list[i].timeMs - t)
-      if (d < minD) {
-        minD = d
-        nearest = list[i]
-      }
+  // 寻找与当前播放时刻 targetTimeMs 最匹配的视频帧（容差范围优先 7.5s 内）
+  let best = list[0]
+  let minDiff = Math.abs(list[0].timeMs - targetTimeMs)
+
+  for (let i = 1; i < list.length; i++) {
+    const diff = Math.abs(list[i].timeMs - targetTimeMs)
+    if (diff < minDiff) {
+      minDiff = diff
+      best = list[i]
     }
-    animCandidateFrames = [nearest]
   }
 
-  // 立即绘制第一帧
-  if (hoverCanvasRef.value && animCandidateFrames[0]?.canvas) {
-    const destCtx = hoverCanvasRef.value.getContext('2d')
-    if (destCtx) {
-      destCtx.drawImage(animCandidateFrames[0].canvas, 0, 0, hoverCanvasRef.value.width, hoverCanvasRef.value.height)
-    }
+  if (best && best.canvas) {
+    destCtx.drawImage(best.canvas, 0, 0, destCanvas.width, destCanvas.height)
+  } else {
+    renderFallbackFrame(destCtx, destCanvas.width, destCanvas.height, targetTimeMs)
   }
 }
 
-function renderFallbackFrame() {
-  if (!hoverCanvasRef.value) return
-  const ctx = hoverCanvasRef.value.getContext('2d')
-  if (!ctx) return
-  ctx.fillStyle = '#101520'
-  ctx.fillRect(0, 0, hoverCanvasRef.value.width, hoverCanvasRef.value.height)
+// 视频流初始化前或暂无视频帧时的现代感保底画面
+function renderFallbackFrame(ctx, width, height, timeMs) {
+  ctx.fillStyle = '#0f141c'
+  ctx.fillRect(0, 0, width, height)
 
-  // 绘制动态渐变脉冲图景
-  const grad = ctx.createLinearGradient(0, 0, 200, 112)
+  // 绘制科技感微型网格与渐变光晕
+  const grad = ctx.createLinearGradient(0, 0, width, height)
   grad.addColorStop(0, '#1677ff')
   grad.addColorStop(1, '#0958d9')
   ctx.fillStyle = grad
-  ctx.font = 'bold 12px sans-serif'
+  ctx.fillRect(0, height - 3, (clipProgressPercent.value / 100) * width, 3)
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+  ctx.font = 'bold 13px sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText('会中实时画面切片', 100, 50)
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'
+  ctx.fillText('15s 视频回放切片', width / 2, 54)
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.65)'
+  ctx.font = '11px monospace'
+  ctx.fillText(`${formatMs(timeMs)} (+${(clipElapsedMs.value / 1000).toFixed(1)}s)`, width / 2, 76)
+
+  ctx.fillStyle = 'rgba(88, 166, 255, 0.85)'
   ctx.font = '10px sans-serif'
-  ctx.fillText(formatMs(currentHoverTimeMs.value), 100, 70)
+  ctx.fillText('会中讨论画面采集中...', width / 2, 98)
 }
 
 // ==========================================
-// 拖拽与点击交互
+// 拖拽、快退、回到开头与点击交互
 // ==========================================
 function calculatePercentFromEvent(e) {
   if (!trackRef.value) return 0
@@ -567,13 +756,12 @@ function handleMouseMove(e) {
   hoverPercent.value = percent
   hoverTimeMs.value = Math.round((percent / 100) * safeDurationMs.value)
   hoverVisible.value = true
-  updateCandidateFrames()
 }
 
 function handleMouseLeave() {
   if (!isDragging.value) {
     hoverVisible.value = false
-    stopHoverMiniPlayback()
+    stop15sClipPlayback()
   }
 }
 
@@ -592,7 +780,6 @@ function startDrag(e) {
   const percent = calculatePercentFromEvent(e)
   dragPercent.value = percent
   dragTimeMs.value = Math.round((percent / 100) * safeDurationMs.value)
-  updateCandidateFrames()
   emit('dragging', dragTimeMs.value)
 
   window.addEventListener('mousemove', onGlobalMouseMove)
@@ -606,7 +793,6 @@ function onGlobalMouseMove(e) {
   const percent = calculatePercentFromEvent(e)
   dragPercent.value = percent
   dragTimeMs.value = Math.round((percent / 100) * safeDurationMs.value)
-  updateCandidateFrames()
   emit('dragging', dragTimeMs.value)
 }
 
@@ -615,16 +801,15 @@ function onGlobalTouchMove(e) {
   const percent = calculatePercentFromEvent(e)
   dragPercent.value = percent
   dragTimeMs.value = Math.round((percent / 100) * safeDurationMs.value)
-  updateCandidateFrames()
   emit('dragging', dragTimeMs.value)
 }
 
-function onGlobalMouseUp(e) {
+function onGlobalMouseUp() {
   if (!isDragging.value) return
   stopDrag()
 }
 
-function onGlobalTouchEnd(e) {
+function onGlobalTouchEnd() {
   if (!isDragging.value) return
   stopDrag()
 }
@@ -642,11 +827,16 @@ function stopDrag() {
 function seekToMs(targetMs) {
   const maxMs = props.durationMs || 0
   // 若距离最新时长不足 4 秒，视作回到实时
-  if (targetMs >= maxMs - 4000) {
+  if (targetMs >= maxMs - 4000 && maxMs > 4000) {
     returnToLive()
   } else {
     emit('seek', Math.max(0, targetMs))
   }
+}
+
+// 直接回溯到会议开头 00:00 录像
+function seekToStart() {
+  emit('seek', 0)
 }
 
 function seekRelative(deltaSeconds) {
@@ -661,9 +851,17 @@ function returnToLive() {
 
 watch(hoverVisible, (visible) => {
   if (visible) {
-    startHoverMiniPlayback()
+    start15sClipPlayback()
   } else {
-    stopHoverMiniPlayback()
+    stop15sClipPlayback()
+  }
+})
+
+// 悬停时间点发生跳变时重新定位 15 秒播放窗口
+watch(currentHoverTimeMs, () => {
+  if (hoverVisible.value) {
+    clipElapsedMs.value = 0
+    renderCurrentClipFrame()
   }
 })
 
@@ -674,7 +872,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopFrameSampling()
-  stopHoverMiniPlayback()
+  stop15sClipPlayback()
   window.removeEventListener('mousemove', onGlobalMouseMove)
   window.removeEventListener('mouseup', onGlobalMouseUp)
   window.removeEventListener('touchmove', onGlobalTouchMove)
@@ -721,16 +919,37 @@ onUnmounted(() => {
   color: #c9d1d9;
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .shift-btn:hover {
   background: rgba(255, 255, 255, 0.18);
   color: #ffffff;
   border-color: #58a6ff;
+}
+
+/* 回到开头按钮专属高亮微光 */
+.jump-start-btn {
+  background: rgba(22, 119, 255, 0.16);
+  border-color: rgba(22, 119, 255, 0.4);
+  color: #58a6ff;
+}
+
+.jump-start-btn:hover {
+  background: rgba(22, 119, 255, 0.3);
+  border-color: #1677ff;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(22, 119, 255, 0.5);
+}
+
+.btn-icon {
+  font-size: 10px;
 }
 
 .time-display {
@@ -763,7 +982,7 @@ onUnmounted(() => {
 .timeshift-track-wrapper {
   position: relative;
   flex: 1;
-  height: 36px;
+  height: 38px;
   display: flex;
   align-items: center;
   cursor: pointer;
@@ -772,16 +991,16 @@ onUnmounted(() => {
 .track-bg {
   position: relative;
   width: 100%;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 4px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
   overflow: visible;
   transition: height 0.15s ease;
 }
 
 .timeshift-track-wrapper:hover .track-bg,
 .is-dragging .track-bg {
-  height: 11px;
+  height: 14px;
 }
 
 /* 议题分段色块 */
@@ -789,21 +1008,110 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   height: 100%;
-  border-right: 1.5px solid rgba(255, 255, 255, 0.4);
+  border-right: 1.5px solid rgba(255, 255, 255, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  cursor: pointer;
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.topic-chunk:hover {
+  filter: brightness(1.25);
+  z-index: 5;
+}
+
+.topic-chunk.is-active-chunk {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.chunk-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
   pointer-events: none;
 }
 
-.chunk-label {
+.chunk-index {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.95);
+  opacity: 0.85;
+}
+
+.chunk-title {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.95);
-  font-weight: 500;
-  padding: 0 4px;
+  font-weight: 600;
   line-height: 1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.chunk-timeband {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+/* 议题提示框 */
+.topic-tooltip-content {
+  max-width: 260px;
+  padding: 2px;
+}
+
+.topic-tt-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.topic-tt-badge {
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.topic-tt-title {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.topic-tt-timeband {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #58a6ff;
+  margin-bottom: 4px;
+}
+
+.topic-tt-timeband .tt-dur {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+}
+
+.topic-tt-summary {
+  font-size: 11px;
+  color: #c9d1d9;
+  line-height: 1.4;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.topic-tt-action {
+  font-size: 10px;
+  color: #7ee787;
+  font-weight: 500;
 }
 
 /* 进度填色 */
@@ -813,7 +1121,7 @@ onUnmounted(() => {
   left: 0;
   height: 100%;
   background: linear-gradient(90deg, #1677ff, #58a6ff);
-  border-radius: 4px;
+  border-radius: 5px;
   pointer-events: none;
 }
 
@@ -905,7 +1213,7 @@ onUnmounted(() => {
 .pin-consensus .pin-dot { background-color: #13c2c2; }
 .pin-key_point .pin-dot { background-color: #1677ff; }
 
-/* 悬停「短额回放播放」浮动预览框 */
+/* 悬停「15 秒短视频播放」浮动预览框 */
 .hover-preview-indicator {
   position: absolute;
   bottom: 24px;
@@ -923,16 +1231,54 @@ onUnmounted(() => {
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
   overflow: hidden;
-  width: 204px;
+  width: 244px;
   display: flex;
   flex-direction: column;
 }
 
-/* 微型视频短额回放画面视窗 */
+/* 顶部 15s 切片栏 */
+.clip-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #161b22;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.clip-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.clip-play-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4d4f;
+}
+
+.clip-mode-text {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ff7875;
+  letter-spacing: 0.3px;
+}
+
+.clip-range-pill {
+  font-size: 10px;
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.12);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+/* 微型视频 15s 播放视窗 (16:9) */
 .mini-screen-box {
   position: relative;
-  width: 200px;
-  height: 112px;
+  width: 240px;
+  height: 135px;
   background: #000000;
   margin: 2px;
   border-radius: 6px;
@@ -946,28 +1292,20 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
-.mini-live-tag {
+/* 15 秒短片进度底轨 */
+.clip-15s-scrubber {
   position: absolute;
-  top: 6px;
-  left: 6px;
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 77, 79, 0.5);
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #ff7875;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
 }
 
-.red-pulse-dot {
-  width: 5px;
-  height: 5px;
-  background: #ff4d4f;
-  border-radius: 50%;
-  animation: pulse-ring 1s infinite;
+.clip-15s-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1677ff, #52c41a);
+  transition: width 0.08s linear;
 }
 
 .mini-time-tag {
@@ -977,9 +1315,21 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.85);
   border-radius: 3px;
   padding: 1px 6px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.mini-time-tag .cur-t {
   color: #58a6ff;
+}
+
+.mini-time-tag .sec-delta {
+  color: #7ee787;
 }
 
 .hover-info-body {
@@ -1023,6 +1373,17 @@ onUnmounted(() => {
   font-size: 9px;
   padding: 0 4px;
   border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.topic-name-span {
+  max-width: 120px;
+}
+
+.topic-span-range {
+  font-size: 9px;
+  color: #8b949e;
+  margin-left: auto;
 }
 
 .hover-event-row {

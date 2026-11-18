@@ -69,6 +69,7 @@
         @waiting="isBuffering = true"
         @canplay="isBuffering = false"
         @ended="handleEnded"
+        @error="handleMediaError"
       ></video>
 
       <!-- 隐藏的音频元素 (若以纯音频播放) -->
@@ -76,11 +77,13 @@
         ref="audioRef"
         v-if="isAudioSource && resolvedUrl"
         :src="resolvedUrl"
+        preload="auto"
         @play="isPlaying = true"
         @pause="isPlaying = false"
         @timeupdate="handleAudioTimeUpdate"
         @loadedmetadata="handleLoadedMetadata"
         @ended="handleEnded"
+        @error="handleMediaError"
       ></audio>
 
       <!-- 顶部当前议题浮层指示 -->
@@ -259,6 +262,10 @@ const props = defineProps({
   mediaTitle: {
     type: String,
     default: ''
+  },
+  mediaType: {
+    type: String,
+    default: ''
   }
 })
 
@@ -287,8 +294,18 @@ const resolvedUrl = computed(() => {
 
 // 判断当前源是否为纯音频
 const isAudioSource = computed(() => {
+  if (props.mediaType === 'AUDIO') return true
   const url = (resolvedUrl.value || '').toLowerCase()
-  return url.includes('.mp3') || url.includes('.wav') || url.includes('.m4a') || url.includes('.aac') || url.includes('/recording/download/')
+  return (
+    url.includes('.mp3') ||
+    url.includes('.wav') ||
+    url.includes('.m4a') ||
+    url.includes('.aac') ||
+    url.includes('.webm') ||
+    url.includes('.ogg') ||
+    url.includes('.flac') ||
+    url.includes('/recording/download/')
+  )
 })
 
 // 计算有效总时长
@@ -338,7 +355,10 @@ function getActiveMediaElement() {
   if (isAudioSource.value) {
     return audioRef.value
   }
-  return videoRef.value
+  if (resolvedUrl.value && !isAudioSource.value) {
+    return videoRef.value
+  }
+  return null
 }
 
 function loadMediaSource(url) {
@@ -408,7 +428,8 @@ function clearVirtualTimer() {
 
 watch(isPlaying, (val) => {
   const media = getActiveMediaElement()
-  if (val && !media) {
+  const isMediaActuallyPlaying = media && !media.paused && !media.error
+  if (val && (!media || !isMediaActuallyPlaying)) {
     clearVirtualTimer()
     virtualTimer = setInterval(() => {
       if (currentTimeMs.value >= effectiveDurationMs.value) {
@@ -427,16 +448,27 @@ watch(isPlaying, (val) => {
 
 function togglePlay() {
   const media = getActiveMediaElement()
-  if (!media) {
+  if (!media || !resolvedUrl.value) {
     // 若暂无真实音视频，虚拟模拟播放与时间流逝
     isPlaying.value = !isPlaying.value
     return
   }
   if (media.paused) {
-    media.play().catch((err) => console.warn('播放失败:', err))
+    media.play().then(() => {
+      isPlaying.value = true
+    }).catch((err) => {
+      console.warn('播放失败，切换为时间轴模拟播放:', err)
+      isPlaying.value = true
+    })
   } else {
     media.pause()
+    isPlaying.value = false
   }
+}
+
+function handleMediaError(e) {
+  console.warn('音视频加载失败:', e)
+  isBuffering.value = false
 }
 
 function handleTimeUpdate() {

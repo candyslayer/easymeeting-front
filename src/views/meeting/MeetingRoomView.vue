@@ -301,7 +301,7 @@
                   :duration-ms="meetingDurationMs"
                   :current-time-ms="timeShiftCurrentMs"
                   :is-rewound="isTimeShiftActive"
-                  :topics="aiStore.agendaTopics"
+                  :topics="activeLiveTopics"
                   :events="aiStore.decisions"
                   :segments="realtimeSegments"
                   :active-stream="spotlightStream"
@@ -542,10 +542,36 @@
                         (落后实时 -{{ formatMs(Math.max(0, meetingDurationMs - timeShiftCurrentMs)) }})
                       </span>
                     </div>
-                    <button type="button" class="ts-live-btn" @click="handleReturnToLive">
-                      <span class="ts-live-dot pulse"></span>
-                      <span>返回实时直播 (LIVE)</span>
-                    </button>
+                    <div class="ts-banner-right">
+                      <button
+                        type="button"
+                        class="ts-quick-btn jump-start"
+                        title="回溯到会议开头 00:00"
+                        @click="handleTimeShiftSeek(0)"
+                      >
+                        <span>⏮ 回到开头</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="ts-quick-btn"
+                        title="回退 10 秒"
+                        @click="handleTimeShiftSeek(Math.max(0, timeShiftCurrentMs - 10000))"
+                      >
+                        <span>-10s</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="ts-quick-btn"
+                        title="快进 10 秒"
+                        @click="handleTimeShiftSeek(Math.min(meetingDurationMs, timeShiftCurrentMs + 10000))"
+                      >
+                        <span>+10s</span>
+                      </button>
+                      <button type="button" class="ts-live-btn" @click="handleReturnToLive">
+                        <span class="ts-live-dot pulse"></span>
+                        <span>返回实时直播 (LIVE)</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div v-if="rewoundSubtitle" class="timeshift-subtitle-float">
@@ -579,7 +605,7 @@
                   :duration-ms="meetingDurationMs"
                   :current-time-ms="timeShiftCurrentMs"
                   :is-rewound="isTimeShiftActive"
-                  :topics="aiStore.agendaTopics"
+                  :topics="activeLiveTopics"
                   :events="aiStore.decisions"
                   :segments="realtimeSegments"
                   :active-stream="spotlightStream"
@@ -914,7 +940,7 @@
                 :duration-ms="meetingDurationMs"
                 :current-time-ms="timeShiftCurrentMs"
                 :is-rewound="isTimeShiftActive"
-                :topics="aiStore.agendaTopics"
+                :topics="activeLiveTopics"
                 :events="aiStore.decisions"
                 :segments="realtimeSegments"
                 :active-stream="spotlightStream"
@@ -1457,6 +1483,13 @@ const timeShiftCurrentMs = ref(0)
 
 const meetingDurationMs = computed(() => {
   return (meetingStore.durationSeconds || 0) * 1000
+})
+
+const activeLiveTopics = computed(() => {
+  if (aiStore.topicsV2 && aiStore.topicsV2.length > 0) {
+    return aiStore.topicsV2
+  }
+  return aiStore.agendaTopics || []
 })
 
 function handleTimeShiftSeek(targetMs) {
@@ -3336,6 +3369,41 @@ onUnmounted(() => {
 .ts-rewind-lag {
   color: #8b949e;
   font-size: 12px;
+}
+
+.ts-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ts-quick-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #c9d1d9;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ts-quick-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: #58a6ff;
+}
+
+.ts-quick-btn.jump-start {
+  background: rgba(22, 119, 255, 0.2);
+  border-color: #1677ff;
+  color: #58a6ff;
+}
+
+.ts-quick-btn.jump-start:hover {
+  background: #1677ff;
+  color: #ffffff;
 }
 
 .ts-live-btn {
